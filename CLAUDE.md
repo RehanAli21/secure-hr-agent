@@ -18,7 +18,7 @@ python -m venv .venv
 .venv\Scripts\python -m uvicorn app.main:app --reload    # API at http://localhost:8000, docs at /docs
 ```
 
-The database is PostgreSQL: during development the locally installed PostgreSQL 18 (port 5432, database `gatekeeper_hr`). The connection string is `DATABASE_URL` in `backend/.env` (gitignored; template in `.env.example`), loaded by `app/database.py`. Tables are created on startup by `Base.metadata.create_all`. There are no migrations yet: `create_all` won't alter existing tables, so after changing a column in `models.py` drop the affected tables. A Docker Compose setup for one-command install comes at the end of the project. No tests or linter yet.
+The database is PostgreSQL: during development the locally installed PostgreSQL 18 (port 5432, database `gatekeeper_hr`). The connection string is `DATABASE_URL` in `backend/.env` (gitignored; template in `.env.example`), loaded by `app/database.py`. Tables are created on startup by `Base.metadata.create_all`. There are no migrations yet: `create_all` won't alter existing tables, so after changing a column in `models.py` drop the affected tables. A Docker Compose setup for one-command install comes at the end of the project. No tests yet. The owner uses Pylance in **strict** mode: code must type-check cleanly (models use SQLAlchemy 2.0 `Mapped[...]`/`mapped_column` style; timestamps are timezone-aware UTC). To check from the terminal, put `{"include":["app"],"typeCheckingMode":"strict","venvPath":".","venv":".venv"}` in a temporary `backend/pyrightconfig.json` and run `npx pyright` from `backend/`.
 
 ## What this is
 
