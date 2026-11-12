@@ -1,14 +1,9 @@
 from fastapi import FastAPI
 
-from app.database import engine
 from app.routers import departments, employees
 
-# this line imports all table which then create table in database if tables does not exists.
-from app import models
-
-# Create all tables in the database if they don't exist yet.
-# models.Base knows every table class written in models.py.
-models.Base.metadata.create_all(bind=engine)
+# The tables are created and updated by Alembic migrations, not here.
+# Run this before starting the server:   alembic upgrade head
 
 app = FastAPI(title="Gatekeeper HR API")
 
