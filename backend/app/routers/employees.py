@@ -7,11 +7,17 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import Department, Employee
+from app.models import Department, Employee, User
 from app.schemas import EmployeeCreate, EmployeeUpdate, EmployeeOut
+from app.security import get_current_user
 
 # Every endpoint in this file starts with /employees.
-router = APIRouter(prefix="/employees", tags=["Employees"])
+# dependencies=[...] means: every endpoint here needs a valid login token first.
+router = APIRouter(
+    prefix="/employees",
+    tags=["Employees"],
+    dependencies=[Depends(get_current_user)],
+)
 
 
 # ---------- Helper checks ----------
@@ -124,6 +130,12 @@ def terminate_employee(employee_id: int, db: Session = Depends(get_db)):
 
     # We keep the record forever. We only change the status.
     employee.employment_status = "terminated"
+
+    # Also disable their login account (if they have one), so they can't log in anymore.
+    user = db.query(User).filter(User.employee_id == employee.id).first()
+    if user is not None:
+        user.is_active = False
+
     db.commit()
     db.refresh(employee)
     return employee

@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 
-from app.routers import departments, employees
+from app.routers import auth, departments, employees
 
 # The tables are created and updated by Alembic migrations, not here.
 # Run this before starting the server:   alembic upgrade head
@@ -8,6 +8,7 @@ from app.routers import departments, employees
 app = FastAPI(title="Gatekeeper HR API")
 
 # Plug in the endpoints from the routers folder.
+app.include_router(auth.router)
 app.include_router(departments.router)
 app.include_router(employees.router)
 

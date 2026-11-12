@@ -72,3 +72,37 @@ class EmployeeOut(BaseModel):
     start_date: date
     created_at: datetime
     updated_at: datetime
+
+
+# ---------- Login ----------
+
+class LoginRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    email: str
+    password: str
+
+
+class TokensOut(BaseModel):
+    access_token: str
+    refresh_token: str
+    token_type: str = "bearer"
+
+
+class RefreshRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    refresh_token: str
+
+
+class AccessTokenOut(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+
+
+class MeOut(BaseModel):
+    # Who is logged in. Notice: no password_hash here. It never leaves the server.
+    id: int
+    email: str
+    kind: str  # "user" or "superuser"
+    employee_id: Optional[int] = None  # superusers are not linked to an employee

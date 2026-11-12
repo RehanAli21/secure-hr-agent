@@ -1,7 +1,7 @@
 from datetime import date, datetime, timezone
 from typing import Optional
 
-from sqlalchemy import String, DateTime, ForeignKey
+from sqlalchemy import Boolean, String, DateTime, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -49,3 +49,34 @@ class Employee(Base):
     # updated_at will later help us notice if a record changed before a user confirms an action.
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+
+
+class SuperUser(Base):
+    """A special account that can access everything. It is NOT linked to any employee."""
+
+    __tablename__ = "super_users"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    email: Mapped[str] = mapped_column(String, unique=True)
+    password_hash: Mapped[str] = mapped_column(String)
+
+
+class User(Base):
+    """A login account. One person = one user, linked to their employee record."""
+
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    email: Mapped[str] = mapped_column(String, unique=True)
+
+    # We NEVER store the real password, only a scrambled version of it (a "hash").
+    password_hash: Mapped[str] = mapped_column(String)
+
+    # Which employee this account belongs to.
+    # It can be empty, for example for a system admin account.
+    employee_id: Mapped[Optional[int]] = mapped_column(ForeignKey("employees.id"), unique=True)
+
+    # When False, this user cannot log in and their tokens stop working.
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)

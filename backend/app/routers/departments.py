@@ -6,9 +6,15 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import Department
 from app.schemas import DepartmentCreate, DepartmentUpdate, DepartmentOut
+from app.security import get_current_user
 
 # Every endpoint in this file starts with /departments.
-router = APIRouter(prefix="/departments", tags=["Departments"])
+# dependencies=[...] means: every endpoint here needs a valid login token first.
+router = APIRouter(
+    prefix="/departments",
+    tags=["Departments"],
+    dependencies=[Depends(get_current_user)],
+)
 
 
 def find_department(db: Session, department_id: int) -> Department:
