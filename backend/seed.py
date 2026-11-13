@@ -88,6 +88,21 @@ def pick_termination_date(employee: Employee) -> date:
     return earliest + timedelta(days=random.Random(employee.id).randint(0, (TODAY - earliest).days))
 
 
+STREETS = ["Oak Street", "Maple Avenue", "Park Road", "Hill Lane", "River Drive", "Lake View", "Garden Way", "Station Road"]
+CITIES = ["Springfield", "Riverton", "Lakeside", "Fairview", "Greenville", "Brookfield"]
+
+
+def set_contact_details(employee: Employee) -> None:
+    """Give an employee a made-up phone number and home address.
+
+    random.Random(f"contact-{id}") always gives the same details for the same person,
+    and it does not change any of the other random data.
+    """
+    rng = random.Random(f"contact-{employee.id}")
+    employee.phone = f"+1 555 {rng.randint(100, 999)} {rng.randint(1000, 9999)}"
+    employee.home_address = f"{rng.randint(1, 250)} {rng.choice(STREETS)}, {rng.choice(CITIES)}"
+
+
 def last_day_worked(employee: Employee) -> date:
     """The last day this person worked here: their termination date, or today if they still work here."""
     if employee.termination_date is not None:
@@ -194,6 +209,10 @@ def seed_people(db: Session) -> None:
     # We do this after flush(), because pick_termination_date needs each person's id.
     for employee in db.query(Employee).filter(Employee.employment_status == "terminated").all():
         employee.termination_date = pick_termination_date(employee)
+
+    # ---------- Phone numbers and home addresses ----------
+    for employee in db.query(Employee).all():
+        set_contact_details(employee)
 
     # ---------- A login for every employee ----------
     # Hashing a password is slow ON PURPOSE (it protects against attackers).
@@ -433,7 +452,7 @@ def reset(db: Session) -> None:
     """Delete all demo data. Superusers you created yourself are kept."""
     # TRUNCATE empties tables fast. RESTART IDENTITY makes the ids start at 1 again.
     db.execute(text(
-        "TRUNCATE leave_requests, salaries, performance_reviews, users, employees, departments "
+        "TRUNCATE audit_log, pending_actions, leave_requests, salaries, performance_reviews, users, employees, departments "
         "RESTART IDENTITY CASCADE"
     ))
     db.query(SuperUser).filter(SuperUser.email == SUPERUSER_EMAIL).delete()
@@ -454,7 +473,7 @@ def main() -> None:
     db = SessionLocal()
     try:
         if "--reset" in sys.argv:
-            answer = input("This deletes ALL employees, logins, salaries, leave and reviews. Type yes to continue: ")
+            answer = input("This deletes ALL employees, logins, salaries, leave, reviews and the audit log. Type yes to continue: ")
             if answer.strip().lower() != "yes":
                 print("Nothing deleted.")
                 return

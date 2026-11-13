@@ -7,7 +7,7 @@
 
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -33,6 +33,7 @@ class DepartmentOut(BaseModel):
 
     id: int
     name: str
+    deleted_at: Optional[datetime]  # empty = not deleted
 
 
 # ---------- Employees ----------
@@ -72,8 +73,20 @@ class EmployeeOut(BaseModel):
     employment_status: str
     start_date: date
     termination_date: Optional[date]
+    phone: Optional[str]
+    home_address: Optional[str]  # hidden (None) for people who may not see it, see app/permissions.py
     created_at: datetime
     updated_at: datetime
+
+
+class ContactUpdate(BaseModel):
+    """The contact details an employee may change themselves."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    # pattern = only digits, spaces, and the characters + - ( )
+    phone: Optional[str] = Field(default=None, max_length=30, pattern=r"^[0-9+\-() ]+$")
+    home_address: Optional[str] = Field(default=None, min_length=1, max_length=300)
 
 
 class TerminateRequest(BaseModel):
@@ -160,7 +173,108 @@ class ReviewOut(BaseModel):
     period: str
     rating: int
     comments: Optional[str]
+    deleted_at: Optional[datetime]  # empty = not deleted
     created_at: datetime
+
+
+# ---------- Roles ----------
+
+Role = Literal["employee", "manager", "hr", "admin"]
+
+
+class RoleUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    role: Role
+
+
+class RoleOut(BaseModel):
+    employee_id: int
+    user_id: int
+    role: str
+
+
+class RoleInfo(BaseModel):
+    name: str
+    description: str
+    permissions: list[str]
+
+
+class PermissionsOut(BaseModel):
+    kind: str             # "user" or "superuser"
+    role: Optional[str]   # superusers have no role
+    is_manager: bool      # True if someone reports directly to you
+    permissions: list[str]
+
+
+# ---------- Audit log ----------
+
+class AuditLogOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    account_kind: str
+    account_id: int
+    action: str
+    table_name: str
+    record_id: int
+    before: Optional[dict[str, Any]]
+    after: Optional[dict[str, Any]]
+    source: str
+    pending_action_id: Optional[int]
+    created_at: datetime
+
+
+# ---------- Pending actions (big changes that the user must confirm) ----------
+
+# The only actions that can wait for confirmation. Each one runs an existing endpoint.
+ActionName = Literal[
+    "terminate_employee",  # target_id = employee id, args = {"termination_date": "2026-12-31"}
+    "change_salary",       # target_id = employee id, args = {"amount": "80000", "effective_date": "2027-01-01"}
+    "change_role",         # target_id = employee id, args = {"role": "manager"}
+    "change_manager",      # target_id = employee id, args = {"manager_id": 12}
+    "delete_department",   # target_id = department id, args = {}
+    "delete_review",       # target_id = review id, args = {}
+]
+
+
+class ManagerUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    manager_id: Optional[int]  # None = no manager
+
+
+class NoArgs(BaseModel):
+    """For actions that need no arguments. extra="forbid" still rejects anything sent."""
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class PendingActionCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    action: ActionName
+    target_id: int
+    args: dict[str, Any] = Field(default_factory=dict)  # checked against the action's own schema
+
+
+class PendingActionOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    action: str
+    target_id: int
+    args: dict[str, Any]
+    preview: dict[str, Any]
+    status: str
+    created_at: datetime
+    expires_at: datetime
+    decided_at: Optional[datetime]
+
+
+class ConfirmOut(BaseModel):
+    action: PendingActionOut
+    result: dict[str, Any]  # what the real endpoint returned, e.g. the terminated employee
 
 
 # ---------- Login ----------

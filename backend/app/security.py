@@ -133,6 +133,11 @@ def get_current_user(
     return load_account(db, account_id, kind)
 
 
+def account_kind(account: Account) -> str:
+    """ "superuser" or "user". We save this next to the id, because the ids of the two tables overlap."""
+    return "superuser" if isinstance(account, SuperUser) else "user"
+
+
 def is_superuser(account: Account) -> bool:
     """True if this account is a superuser. Superusers are allowed to do everything."""
     return isinstance(account, SuperUser)

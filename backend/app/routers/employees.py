@@ -3,17 +3,30 @@
 #
 # Who may do what (the rules themselves live in app/permissions.py):
 #   - see employees:                 everyone, but only the employees their role allows
+#   - see the home address:          only the employee themselves and hr/admin
+#   - change contact details:        the employee themselves, and hr/admin
 #   - create, change or terminate:   only hr and admin
+#
+# Every change is written to the audit log (see app/audit.py).
 
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
+from app.audit import Origin, get_origin, record_audit, snapshot
 from app.database import get_db
 from app.models import Department, Employee, User
-from app.schemas import EmployeeCreate, EmployeeUpdate, EmployeeOut, TerminateRequest
-from app.permissions import HR_ROLES, can_see_employee, only_visible_employees, require_role
+from app.permissions import (
+    HR_ROLES,
+    can_change_contact_details,
+    can_see_employee,
+    can_see_home_address,
+    only_visible_employees,
+    require_confirmation,
+    require_role,
+)
+from app.schemas import ContactUpdate, EmployeeCreate, EmployeeOut, EmployeeUpdate, TerminateRequest
 from app.security import Account, get_current_user
 
 # Every endpoint in this file starts with /employees.
@@ -49,8 +62,17 @@ def find_visible_employee(db: Session, account: Account, employee_id: int) -> Em
     return employee
 
 
+def to_employee_out(account: Account, employee: Employee) -> EmployeeOut:
+    """Turn an employee into API output, hiding the home address from people who may not see it."""
+    out = EmployeeOut.model_validate(employee)
+    if not can_see_home_address(account, employee):
+        out.home_address = None
+    return out
+
+
 def check_department_exists(db: Session, department_id: int):
-    if db.get(Department, department_id) is None:
+    department = db.get(Department, department_id)
+    if department is None or department.deleted_at is not None:
         raise HTTPException(status_code=400, detail="Department does not exist")
 
 
@@ -72,6 +94,7 @@ def create_employee(
     data: EmployeeCreate,
     db: Session = Depends(get_db),
     account: Account = Depends(get_current_user),
+    origin: Origin = Depends(get_origin),
 ):
     require_role(account, HR_ROLES)
 
@@ -90,9 +113,11 @@ def create_employee(
         employment_status="active",
     )
     db.add(employee)
+    db.flush()  # gives the new employee its id
+    record_audit(db, account, origin, "create_employee", employee, before=None)
     db.commit()
     db.refresh(employee)
-    return employee
+    return to_employee_out(account, employee)
 
 
 @router.get("", response_model=list[EmployeeOut])
@@ -112,7 +137,8 @@ def list_employees(
     if department_id is not None:
         query = query.filter(Employee.department_id == department_id)
 
-    return query.order_by(Employee.name).limit(limit).all()
+    employees = query.order_by(Employee.name).limit(limit).all()
+    return [to_employee_out(account, employee) for employee in employees]
 
 
 @router.get("/{employee_id}", response_model=EmployeeOut)
@@ -121,7 +147,7 @@ def get_employee(
     db: Session = Depends(get_db),
     account: Account = Depends(get_current_user),
 ):
-    return find_visible_employee(db, account, employee_id)
+    return to_employee_out(account, find_visible_employee(db, account, employee_id))
 
 
 @router.patch("/{employee_id}", response_model=EmployeeOut)
@@ -130,6 +156,7 @@ def update_employee(
     data: EmployeeUpdate,
     db: Session = Depends(get_db),
     account: Account = Depends(get_current_user),
+    origin: Origin = Depends(get_origin),
 ):
     require_role(account, HR_ROLES)
     employee = find_employee(db, employee_id)
@@ -140,6 +167,10 @@ def update_employee(
     # Only the fields the client actually sent.
     changes = data.model_dump(exclude_unset=True)
 
+    # Changing someone's manager is a big change: the AI agent must ask the user to confirm it.
+    if "manager_id" in changes:
+        require_confirmation(origin)
+
     if "email" in changes and changes["email"] != employee.email:
         check_email_is_free(db, changes["email"])
     if "department_id" in changes:
@@ -149,13 +180,46 @@ def update_employee(
             raise HTTPException(status_code=400, detail="An employee cannot be their own manager")
         check_manager_exists(db, changes["manager_id"])
 
+    before = snapshot(employee)
+
     # Copy each change onto the employee, e.g. employee.job_title = "Senior Developer"
     for field, value in changes.items():
         setattr(employee, field, value)
 
+    db.flush()
+    record_audit(db, account, origin, "update_employee", employee, before)
     db.commit()
     db.refresh(employee)
-    return employee
+    return to_employee_out(account, employee)
+
+
+@router.patch("/{employee_id}/contact", response_model=EmployeeOut)
+def update_contact_details(
+    employee_id: int,
+    data: ContactUpdate,
+    db: Session = Depends(get_db),
+    account: Account = Depends(get_current_user),
+    origin: Origin = Depends(get_origin),
+):
+    """Change a phone number or home address. Employees may do this for themselves."""
+    employee = find_visible_employee(db, account, employee_id)
+
+    if not can_change_contact_details(account, employee):
+        raise HTTPException(status_code=403, detail="You can only change your own contact details")
+
+    if employee.employment_status == "terminated":
+        raise HTTPException(status_code=400, detail="Cannot change a terminated employee")
+
+    before = snapshot(employee)
+
+    for field, value in data.model_dump(exclude_unset=True).items():
+        setattr(employee, field, value)
+
+    db.flush()
+    record_audit(db, account, origin, "update_contact_details", employee, before)
+    db.commit()
+    db.refresh(employee)
+    return to_employee_out(account, employee)
 
 
 @router.post("/{employee_id}/terminate", response_model=EmployeeOut)
@@ -164,8 +228,10 @@ def terminate_employee(
     data: TerminateRequest,
     db: Session = Depends(get_db),
     account: Account = Depends(get_current_user),
+    origin: Origin = Depends(get_origin),
 ):
     require_role(account, HR_ROLES)
+    require_confirmation(origin)
     employee = find_employee(db, employee_id)
 
     if employee.employment_status == "terminated":
@@ -173,6 +239,8 @@ def terminate_employee(
 
     if data.termination_date < employee.start_date:
         raise HTTPException(status_code=400, detail="Termination date cannot be before the start date")
+
+    before = snapshot(employee)
 
     # We keep the record forever. We only change the status and save the last day.
     employee.employment_status = "terminated"
@@ -183,6 +251,8 @@ def terminate_employee(
     if user is not None:
         user.is_active = False
 
+    db.flush()
+    record_audit(db, account, origin, "terminate_employee", employee, before)
     db.commit()
     db.refresh(employee)
-    return employee
+    return to_employee_out(account, employee)

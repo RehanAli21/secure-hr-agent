@@ -1,8 +1,8 @@
 from datetime import date, datetime, timezone
 from decimal import Decimal
-from typing import Optional
+from typing import Any, Optional
 
-from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, Numeric, String, Text, UniqueConstraint
+from sqlalchemy import JSON, Boolean, CheckConstraint, DateTime, ForeignKey, Index, Numeric, String, Text, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -24,6 +24,10 @@ class Department(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String, unique=True)
+
+    # Soft delete: instead of really deleting the row, we fill in WHEN it was deleted.
+    # Empty (None) = not deleted. This way a deleted department can be restored.
+    deleted_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
 
 
 class Employee(Base):
@@ -53,6 +57,11 @@ class Employee(Base):
 
     # The last day they worked here. Empty (None) while they still work here.
     termination_date: Mapped[Optional[date]]
+
+    # Contact details. The employee can change these themselves.
+    phone: Mapped[Optional[str]] = mapped_column(String)
+    # Sensitive: only the employee themselves and hr/admin may see the home address.
+    home_address: Mapped[Optional[str]] = mapped_column(Text)
 
     # When the row was created and last changed.
     # updated_at will later help us notice if a record changed before a user confirms an action.
@@ -168,7 +177,10 @@ class PerformanceReview(Base):
         CheckConstraint("rating BETWEEN 1 AND 5", name="review_rating_1_to_5"),
         CheckConstraint("reviewer_id <> employee_id", name="review_no_self_review"),
         # Only one review per employee for each period, e.g. one "2025-H1" review for Sara.
-        UniqueConstraint("employee_id", "period", name="review_one_per_period"),
+        # postgresql_where = the rule only counts reviews that are NOT deleted.
+        # So after HR deletes a wrong review, the manager can write a new one for that period.
+        Index("review_one_per_period", "employee_id", "period", unique=True,
+              postgresql_where=text("deleted_at IS NULL")),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -184,4 +196,75 @@ class PerformanceReview(Base):
     # Sensitive: written feedback about the person.
     comments: Mapped[Optional[str]] = mapped_column(Text)
 
+    # Soft delete (see Department). Empty = not deleted.
+    deleted_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class AuditLog(Base):
+    """One row for every change anybody makes. We only ever ADD rows here, never change them.
+
+    It answers: who changed what, when, from where, and what did it look like before and after?
+    """
+
+    __tablename__ = "audit_log"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+
+    # Who made the change. "user" or "superuser" + the id in that table.
+    account_kind: Mapped[str] = mapped_column(String)
+    account_id: Mapped[int]
+
+    # What they did, e.g. "terminate_employee", and on which row, e.g. table "employees", id 7.
+    action: Mapped[str] = mapped_column(String)
+    table_name: Mapped[str] = mapped_column(String)
+    record_id: Mapped[int]
+
+    # A copy of the row before and after the change. "before" is empty for new rows.
+    # JSON = the database stores a Python dict as text it can still search in.
+    before: Mapped[Optional[dict[str, Any]]] = mapped_column(JSON)
+    after: Mapped[Optional[dict[str, Any]]] = mapped_column(JSON)
+
+    # "ui" = the person clicked in the app. "agent" = the AI assistant made the request for them.
+    source: Mapped[str] = mapped_column(String)
+
+    # If the change ran because the user confirmed a pending action, which one.
+    pending_action_id: Mapped[Optional[int]] = mapped_column(ForeignKey("pending_actions.id"))
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class PendingAction(Base):
+    """A big change that waits until the user confirms it in the app.
+
+    Example: the AI agent wants to terminate someone. Instead of doing it, it creates a pending action.
+    The app shows the user a preview, and ONLY when the user clicks "Confirm" does the change run.
+    """
+
+    __tablename__ = "pending_actions"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+
+    # Who asked for it. Only this same account can confirm it.
+    account_kind: Mapped[str] = mapped_column(String)
+    account_id: Mapped[int]
+
+    # What to do, e.g. "terminate_employee", on which record, with which exact arguments.
+    action: Mapped[str] = mapped_column(String)
+    target_id: Mapped[int]
+    args: Mapped[dict[str, Any]] = mapped_column(JSON)
+
+    # A copy of the record when the preview was made. If it is different at confirm time,
+    # someone changed the record in the meantime, and we refuse (409).
+    target_version: Mapped[dict[str, Any]] = mapped_column(JSON)
+
+    # What we show the user, built by the API from the real data (never written by the AI).
+    preview: Mapped[dict[str, Any]] = mapped_column(JSON)
+
+    # "pending", "done", "cancelled" or "expired"
+    status: Mapped[str] = mapped_column(String, default="pending")
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    decided_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))

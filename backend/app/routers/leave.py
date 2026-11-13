@@ -8,6 +8,7 @@
 #   - approve / reject:      only the employee's direct manager (so nobody approves their own leave)
 #
 # Superusers may do everything.
+# Every change is written to the audit log (see app/audit.py).
 
 from datetime import date
 from typing import Optional
@@ -15,6 +16,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
+from app.audit import Origin, get_origin, record_audit, snapshot
 from app.database import get_db
 from app.models import Employee, LeaveRequest, SuperUser, utc_now
 from app.permissions import can_see_employee, can_see_leave_reason, is_direct_manager, only_visible_employees
@@ -69,7 +71,7 @@ def check_no_overlap(db: Session, employee_id: int, start_date: date, end_date: 
         raise HTTPException(status_code=409, detail="You already have leave on some of these days")
 
 
-def decide_leave(db: Session, account: Account, leave_id: int, new_status: str) -> LeaveOut:
+def decide_leave(db: Session, account: Account, origin: Origin, leave_id: int, new_status: str) -> LeaveOut:
     """Approve or reject a leave request. Shared by the /approve and /reject endpoints."""
     leave, employee = find_visible_leave(db, account, leave_id)
 
@@ -81,11 +83,15 @@ def decide_leave(db: Session, account: Account, leave_id: int, new_status: str) 
     if leave.status != "pending":
         raise HTTPException(status_code=400, detail=f"This leave request is already {leave.status}")
 
+    before = snapshot(leave)
     leave.status = new_status
     # Superusers are not employees, so for them the approver stays empty.
     leave.approver_id = None if isinstance(account, SuperUser) else account.employee_id
     leave.decided_at = utc_now()
 
+    db.flush()
+    # The action name is "approve_leave" or "reject_leave".
+    record_audit(db, account, origin, "approve_leave" if new_status == "approved" else "reject_leave", leave, before)
     db.commit()
     db.refresh(leave)
     return to_leave_out(account, leave, employee)
@@ -98,6 +104,7 @@ def submit_leave(
     data: LeaveCreate,
     db: Session = Depends(get_db),
     account: Account = Depends(get_current_user),
+    origin: Origin = Depends(get_origin),
 ):
     """Ask for time off for yourself."""
     if isinstance(account, SuperUser) or account.employee_id is None:
@@ -117,6 +124,8 @@ def submit_leave(
         status="pending",
     )
     db.add(leave)
+    db.flush()
+    record_audit(db, account, origin, "submit_leave", leave, before=None)
     db.commit()
     db.refresh(leave)
 
@@ -164,6 +173,7 @@ def cancel_leave(
     leave_id: int,
     db: Session = Depends(get_db),
     account: Account = Depends(get_current_user),
+    origin: Origin = Depends(get_origin),
 ):
     """Cancel your own leave: while it is pending, or when it is approved but has not started yet."""
     leave, employee = find_visible_leave(db, account, leave_id)
@@ -175,7 +185,10 @@ def cancel_leave(
     if not can_cancel:
         raise HTTPException(status_code=400, detail="This leave can no longer be cancelled")
 
+    before = snapshot(leave)
     leave.status = "cancelled"
+    db.flush()
+    record_audit(db, account, origin, "cancel_leave", leave, before)
     db.commit()
     db.refresh(leave)
     return to_leave_out(account, leave, employee)
@@ -186,8 +199,9 @@ def approve_leave(
     leave_id: int,
     db: Session = Depends(get_db),
     account: Account = Depends(get_current_user),
+    origin: Origin = Depends(get_origin),
 ):
-    return decide_leave(db, account, leave_id, "approved")
+    return decide_leave(db, account, origin, leave_id, "approved")
 
 
 @router.post("/{leave_id}/reject", response_model=LeaveOut)
@@ -195,5 +209,6 @@ def reject_leave(
     leave_id: int,
     db: Session = Depends(get_db),
     account: Account = Depends(get_current_user),
+    origin: Origin = Depends(get_origin),
 ):
-    return decide_leave(db, account, leave_id, "rejected")
+    return decide_leave(db, account, origin, leave_id, "rejected")

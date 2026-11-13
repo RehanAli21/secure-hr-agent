@@ -8,13 +8,15 @@
 # Important: we NEVER change or delete an old salary row.
 # A raise is a NEW row with a new effective_date, so the full history is kept forever.
 # There is no PATCH and no DELETE endpoint here on purpose.
+# Every new salary is written to the audit log (see app/audit.py).
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
+from app.audit import Origin, get_origin, record_audit
 from app.database import get_db
 from app.models import Salary, SuperUser
-from app.permissions import HR_ROLES, can_see_salary, require_role
+from app.permissions import HR_ROLES, can_see_salary, require_confirmation, require_role
 from app.routers.employees import find_visible_employee  # reuse: "load an employee I may see, or 404"
 from app.schemas import SalaryCreate, SalaryOut
 from app.security import Account, get_current_user
@@ -53,9 +55,11 @@ def add_salary(
     data: SalaryCreate,
     db: Session = Depends(get_db),
     account: Account = Depends(get_current_user),
+    origin: Origin = Depends(get_origin),
 ):
     """Give an employee a new salary (a raise, or a correction from a date). Adds a new row."""
     require_role(account, HR_ROLES)
+    require_confirmation(origin)  # salary changes asked for by the AI agent must be confirmed
     employee = find_visible_employee(db, account, employee_id)
 
     # Nobody sets their own salary, not even HR.
@@ -83,6 +87,8 @@ def add_salary(
 
     salary = Salary(employee_id=employee.id, amount=data.amount, effective_date=data.effective_date)
     db.add(salary)
+    db.flush()
+    record_audit(db, account, origin, "change_salary", salary, before=None)
     db.commit()
     db.refresh(salary)
     return salary
