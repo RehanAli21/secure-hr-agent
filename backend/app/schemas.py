@@ -114,3 +114,4 @@ class MeOut(BaseModel):
     email: str
     kind: str  # "user" or "superuser"
     employee_id: Optional[int] = None  # superusers are not linked to an employee
+    role: Optional[str] = None  # "employee", "manager", "hr" or "admin". Superusers have no role: they skip all checks.

@@ -7,6 +7,7 @@ from getpass import getpass
 
 from app.database import SessionLocal
 from app.models import Employee, User
+from app.permissions import ROLES
 from app.security import hash_password
 
 
@@ -14,6 +15,11 @@ def main() -> None:
     email = input("Email: ").strip()
     password = getpass("Password (hidden while you type): ")
     employee_id_text = input("Employee id (press Enter to skip): ").strip()
+    role = input(f"Role {ROLES}: ").strip().lower()
+
+    if role not in ROLES:
+        print(f"Role must be one of: {', '.join(ROLES)}")
+        return
 
     if len(password) < 8:
         print("Password must be at least 8 characters.")
@@ -35,10 +41,10 @@ def main() -> None:
                 print("No employee with this id.")
                 return
 
-        user = User(email=email, password_hash=hash_password(password), employee_id=employee_id)
+        user = User(email=email, password_hash=hash_password(password), employee_id=employee_id, role=role)
         db.add(user)
         db.commit()
-        print(f"Created user {user.id} ({user.email}).")
+        print(f"Created user {user.id} ({user.email}) with role {user.role}.")
     finally:
         db.close()
 

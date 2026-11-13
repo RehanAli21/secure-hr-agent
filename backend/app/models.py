@@ -75,6 +75,11 @@ class User(Base):
 
     __tablename__ = "users"
 
+    # The database only accepts these four roles.
+    __table_args__ = (
+        CheckConstraint("role IN ('employee', 'manager', 'hr', 'admin')", name="user_valid_role"),
+    )
+
     id: Mapped[int] = mapped_column(primary_key=True)
     email: Mapped[str] = mapped_column(String, unique=True)
 
@@ -84,6 +89,12 @@ class User(Base):
     # Which employee this account belongs to.
     # It can be empty, for example for a system admin account.
     employee_id: Mapped[Optional[int]] = mapped_column(ForeignKey("employees.id"), unique=True)
+
+    # What this user is allowed to do: "employee", "manager", "hr" or "admin".
+    # The rules for each role live in app/permissions.py.
+    # default = used by Python for new rows. server_default = used by the database,
+    # which also fills in "employee" for users that existed before this column was added.
+    role: Mapped[str] = mapped_column(String, default="employee", server_default="employee")
 
     # When False, this user cannot log in and their tokens stop working.
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)

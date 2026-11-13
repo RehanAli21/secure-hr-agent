@@ -5,7 +5,7 @@
 #   python seed.py --reset   -> deletes ALL demo data first, then fills everything again
 #
 # What it creates:
-#   1. people:       departments, employees (a real org chart), a login for everyone, a demo superuser
+#   1. people:       departments, employees (a real org chart), a login with a role for everyone, a demo superuser
 #   2. salaries:     a starting salary for everyone, plus a raise every year (full history)
 #   3. leave:        annual, sick, unpaid and parental leave, approved/rejected by managers
 #   4. reviews:      a performance review every half year, written by the manager
@@ -134,6 +134,17 @@ def make_person(job_title: str, department: Department, manager: Optional[Employ
     )
 
 
+def pick_role(employee: Employee, hr_department_id: int, manager_ids: set[int]) -> str:
+    """Give each login a role that fits the person's job."""
+    if employee.job_title == "Head of IT":
+        return "admin"     # IT runs the system
+    if employee.department_id == hr_department_id:
+        return "hr"        # everyone in Human Resources
+    if employee.id in manager_ids:
+        return "manager"   # anyone who has people reporting to them
+    return "employee"
+
+
 def seed_people(db: Session) -> None:
     random.seed(42)
 
@@ -189,11 +200,17 @@ def seed_people(db: Session) -> None:
     # So we hash the demo password once and reuse it. Only OK for demo data!
     demo_hash = hash_password(DEMO_PASSWORD)
 
-    for employee in db.query(Employee).all():
+    employees = db.query(Employee).all()
+    hr_department = db.query(Department).filter(Department.name == "Human Resources").one()
+    # Everyone who appears as somebody's manager.
+    manager_ids = {employee.manager_id for employee in employees if employee.manager_id is not None}
+
+    for employee in employees:
         db.add(User(
             email=employee.email,
             password_hash=demo_hash,
             employee_id=employee.id,
+            role=pick_role(employee, hr_department.id, manager_ids),
             is_active=employee.employment_status == "active",
         ))
 
@@ -457,9 +474,16 @@ def main() -> None:
 def print_summary(db: Session) -> None:
     """Print what is in the database, so we can check it looks right."""
     print("\nWhat is in the database now:")
-    for name, table in [("departments", Department), ("employees", Employee), ("logins", User),
-                        ("salaries", Salary), ("leave", LeaveRequest), ("reviews", PerformanceReview)]:
+    tables: list[tuple[str, type[Base]]] = [
+        ("departments", Department), ("employees", Employee), ("logins", User),
+        ("salaries", Salary), ("leave", LeaveRequest), ("reviews", PerformanceReview),
+    ]
+    for name, table in tables:
         print(f"  {name:<12}{db.query(table).count():>6}")
+
+    print("\nLogins per role:")
+    for role in ("employee", "manager", "hr", "admin"):
+        print(f"  {role:<12}{db.query(User).filter(User.role == role).count():>6}")
 
     print(f"\nLog in as any employee with password: {DEMO_PASSWORD}")
     print(f"Superuser: {SUPERUSER_EMAIL} / {DEMO_PASSWORD}  (use /auth/superuser/login)")

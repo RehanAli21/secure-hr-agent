@@ -74,4 +74,5 @@ def me(current_user: Account = Depends(get_current_user)):
         email=current_user.email,
         kind="user",
         employee_id=current_user.employee_id,
+        role=current_user.role,
     )

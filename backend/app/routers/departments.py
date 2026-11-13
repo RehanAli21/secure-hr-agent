@@ -1,4 +1,8 @@
 # All API endpoints for departments live here.
+#
+# Who may do what:
+#   - see departments:            every logged-in user (department names are not secret)
+#   - create or rename one:       only hr and admin
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
@@ -6,7 +10,8 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import Department
 from app.schemas import DepartmentCreate, DepartmentUpdate, DepartmentOut
-from app.security import get_current_user
+from app.permissions import HR_ROLES, require_role
+from app.security import Account, get_current_user
 
 # Every endpoint in this file starts with /departments.
 # dependencies=[...] means: every endpoint here needs a valid login token first.
@@ -33,7 +38,12 @@ def check_name_is_free(db: Session, name: str):
 
 
 @router.post("", response_model=DepartmentOut, status_code=201)
-def create_department(data: DepartmentCreate, db: Session = Depends(get_db)):
+def create_department(
+    data: DepartmentCreate,
+    db: Session = Depends(get_db),
+    account: Account = Depends(get_current_user),
+):
+    require_role(account, HR_ROLES)
     check_name_is_free(db, data.name)
 
     department = Department(name=data.name)
@@ -54,7 +64,13 @@ def get_department(department_id: int, db: Session = Depends(get_db)):
 
 
 @router.patch("/{department_id}", response_model=DepartmentOut)
-def update_department(department_id: int, data: DepartmentUpdate, db: Session = Depends(get_db)):
+def update_department(
+    department_id: int,
+    data: DepartmentUpdate,
+    db: Session = Depends(get_db),
+    account: Account = Depends(get_current_user),
+):
+    require_role(account, HR_ROLES)
     department = find_department(db, department_id)
 
     if data.name is not None and data.name != department.name:
