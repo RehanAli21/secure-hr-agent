@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import Department, Employee, User
-from app.schemas import EmployeeCreate, EmployeeUpdate, EmployeeOut
+from app.schemas import EmployeeCreate, EmployeeUpdate, EmployeeOut, TerminateRequest
 from app.security import get_current_user
 
 # Every endpoint in this file starts with /employees.
@@ -122,14 +122,18 @@ def update_employee(employee_id: int, data: EmployeeUpdate, db: Session = Depend
 
 
 @router.post("/{employee_id}/terminate", response_model=EmployeeOut)
-def terminate_employee(employee_id: int, db: Session = Depends(get_db)):
+def terminate_employee(employee_id: int, data: TerminateRequest, db: Session = Depends(get_db)):
     employee = find_employee(db, employee_id)
 
     if employee.employment_status == "terminated":
         raise HTTPException(status_code=400, detail="Employee is already terminated")
 
-    # We keep the record forever. We only change the status.
+    if data.termination_date < employee.start_date:
+        raise HTTPException(status_code=400, detail="Termination date cannot be before the start date")
+
+    # We keep the record forever. We only change the status and save the last day.
     employee.employment_status = "terminated"
+    employee.termination_date = data.termination_date
 
     # Also disable their login account (if they have one), so they can't log in anymore.
     user = db.query(User).filter(User.employee_id == employee.id).first()

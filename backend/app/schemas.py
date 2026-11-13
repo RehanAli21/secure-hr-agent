@@ -70,8 +70,16 @@ class EmployeeOut(BaseModel):
     manager_id: Optional[int]
     employment_status: str
     start_date: date
+    termination_date: Optional[date]
     created_at: datetime
     updated_at: datetime
+
+
+class TerminateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    # The last day the employee works here. It can be today, in the past, or in the future.
+    termination_date: date
 
 
 # ---------- Login ----------
