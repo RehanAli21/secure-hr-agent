@@ -71,3 +71,37 @@ def only_visible_employees(query: "Query[Employee]", account: Account) -> "Query
         ))
 
     return query.filter(Employee.id == account.employee_id)  # only themselves
+
+
+# ---------- Leave requests ----------
+#
+# The rule for SEEING leave is simple: you can see someone's leave if you can see that employee.
+# So an employee sees their own leave, a manager also sees their reports' leave, and hr/admin see all.
+
+def is_direct_manager(account: Account, employee: Employee) -> bool:
+    """True if this account is the employee's direct manager (checked live from manager_id)."""
+    if isinstance(account, SuperUser) or account.employee_id is None:
+        return False
+    return employee.manager_id == account.employee_id
+
+
+def can_see_leave_reason(account: Account, employee: Employee) -> bool:
+    """The reason can be private (for example a health issue).
+
+    Only the employee themselves and hr/admin may read it. Managers can approve leave without it.
+    """
+    if isinstance(account, SuperUser) or account.role in HR_ROLES:
+        return True
+    return account.employee_id == employee.id
+
+
+# ---------- Salaries ----------
+
+def can_see_salary(account: Account, employee: Employee) -> bool:
+    """Salaries are private: only the employee themselves and hr/admin may see them.
+
+    Notice: managers can NOT see their reports' salaries.
+    """
+    if isinstance(account, SuperUser) or account.role in HR_ROLES:
+        return True
+    return account.employee_id == employee.id

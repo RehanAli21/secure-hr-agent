@@ -2,7 +2,7 @@ from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Optional
 
-from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, Numeric, String, Text
+from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -167,6 +167,8 @@ class PerformanceReview(Base):
     __table_args__ = (
         CheckConstraint("rating BETWEEN 1 AND 5", name="review_rating_1_to_5"),
         CheckConstraint("reviewer_id <> employee_id", name="review_no_self_review"),
+        # Only one review per employee for each period, e.g. one "2025-H1" review for Sara.
+        UniqueConstraint("employee_id", "period", name="review_one_per_period"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
