@@ -99,6 +99,22 @@ Every change, confirmed or not, is written to the audit log: `GET /audit-log` (h
 | `python create_superuser.py` | Create a superuser that can access everything |
 | `python seed.py --reset` | Delete all demo data and create it again (keeps superusers you created yourself) |
 
+## Run the automated tests
+
+The tests use a **separate** database, so your demo data is never touched. One-time setup:
+
+1. Create the test database: `CREATE DATABASE gatekeeper_hr_test;`
+2. Add `TEST_DATABASE_URL` to your `.env` (see `.env.example`).
+
+Then run all tests with:
+
+```
+pytest
+```
+
+`pytest -v` shows every test by name. `pytest tests/test_setup.py` runs only one file.
+The tests build the tables themselves (with the migrations) and empty them before every test.
+
 ## Database migrations
 
 After you change `app/models.py`:

@@ -6,3 +6,7 @@ python-dotenv==1.0.1
 alembic==1.14.0
 pyjwt==2.10.1
 bcrypt==4.2.1
+
+# Testing (only needed to run the tests)
+pytest==8.3.4
+httpx==0.28.1

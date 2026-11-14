@@ -21,7 +21,10 @@ python -m venv .venv
 .venv\Scripts\python seed.py                              # demo data: 550 employees + logins, salaries, leave, reviews (fills empty tables only; password Password123!)
 .venv\Scripts\python seed.py --reset                      # wipe all demo data and reseed (keeps superusers you created yourself)
 .venv\Scripts\python -m uvicorn app.main:app --reload    # API at http://localhost:8000, docs at /docs
+.venv\Scripts\python -m pytest                           # run all tests (-v for names; pytest tests/test_x.py::test_name for one test)
 ```
+
+Tests (`backend/tests/`, pytest + FastAPI `TestClient`): `conftest.py` points `DATABASE_URL` at `TEST_DATABASE_URL` (a separate `gatekeeper_hr_test` DB; it refuses to run unless the name ends in `_test`) **before importing `app`**, runs `alembic upgrade head` once per session, and the `db` fixture TRUNCATEs every table before each test; `client` depends on `db`. Test data is created with plain functions in `tests/helpers.py` (`create_employee`, `create_login`, `create_superuser`, `log_in`; one shared bcrypt hash for speed). Tests must also pass strict Pyright (annotate fixtures and test parameters).
 
 Migrations (Alembic, run from `backend/`):
 
@@ -43,7 +46,7 @@ Backend rules (all in `app/`):
 - **Confirmation** (`pending_actions.py`, `routers/actions.py`): terminate, salary, role, manager change, delete department and delete review call `require_confirmation(origin)`, which blocks agent-sourced calls unless they run from a confirmed pending action. `POST /actions` (hr/admin) validates args with the real endpoint's schema and stores a backend-built preview plus a `target_version` snapshot. `POST /actions/{id}/confirm` is owner-only, single-use, expires after 5 min, rejects the agent, returns 409 if the snapshot changed, and runs the real endpoint function (so every check runs again) with `pending_action_id` in the audit row. Multi-step actions and bulk updates are not built.
 - The seed gives HR staff `hr`, the Head of IT `admin` and anyone with reports `manager`, plus deterministic phone/address per employee.
 
-Not built yet: rate limits, `Idempotency-Key`, bulk caps, least-privilege DB role, automated tests. A Docker Compose setup for one-command install comes at the end of the project. The owner uses Pylance in **strict** mode: code must type-check cleanly (models use SQLAlchemy 2.0 `Mapped[...]`/`mapped_column` style; timestamps are timezone-aware UTC). To check from the terminal, put `{"include":["app"],"typeCheckingMode":"strict","venvPath":".","venv":".venv"}` in a temporary `backend/pyrightconfig.json` and run `npx pyright` from `backend/`.
+Not built yet: rate limits, `Idempotency-Key`, bulk caps, least-privilege DB role; the automated tests (130) cover every router: auth, employees, leave, salaries, reviews, roles, audit log, soft deletes and pending actions (`tests/test_*.py`; most use the shared `org` fixture from `conftest.py` / `helpers.create_org`: Hana hr, Mona manager, Ravi her report, Omar a stranger; `helpers.as_agent(headers)` adds `X-Request-Source: agent`). Use 2099 dates where a rule compares with today. When adding a rule, add a test, and check it by breaking the rule on purpose: the test must fail. A Docker Compose setup for one-command install comes at the end of the project. The owner uses Pylance in **strict** mode: code must type-check cleanly (models use SQLAlchemy 2.0 `Mapped[...]`/`mapped_column` style; timestamps are timezone-aware UTC). To check from the terminal, put `{"include":["app"],"typeCheckingMode":"strict","venvPath":".","venv":".venv"}` in a temporary `backend/pyrightconfig.json` and run `npx pyright` from `backend/`.
 
 ## What this is
 
