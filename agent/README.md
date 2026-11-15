@@ -9,7 +9,25 @@ Chat UI (React)  -->  agent service (this folder)  -->  CRUD API (../backend)  -
 **The AI proposes, the API decides.** This service has no database password. It reaches HR data only
 through the CRUD API, using the logged-in user's token, so it can never do more than that user.
 
-Right now it has login, logout and "who am I?". The AI and its tools come in the next steps.
+It has login, logout, "who am I?" and a chat with one read-only tool (`get_my_profile`).
+More tools come in the next steps.
+
+## How a chat message is answered
+
+```
+POST /chat "What is my job title?"
+  1. The model gets: the rules (system prompt) + the message + the list of tools
+  2. The model asks: "call get_my_profile"
+  3. The agent checks the tool name and its arguments, then runs it:
+       get_my_profile -> CRUD API /me and /employees/{id}, with the user's own token
+  4. Only allowed fields go back to the model (no home address), marked as <tool_result> data
+  5. The model answers: "You are an Executive Assistant."
+```
+
+- The model **can't see the token**: tools are built inside `make_tools(session)`, so they use the
+  session without it ever being a parameter the model sees.
+- A made-up tool name or argument is refused before anything runs.
+- At most 8 tool calls per message, so a confused model can't loop forever.
 
 ## How login works
 
@@ -31,6 +49,14 @@ Right now it has login, logout and "who am I?". The AI and its tools come in the
 
 - Python 3.10 or newer
 - The CRUD API from `../backend`, running (see its README)
+- [Ollama](https://ollama.com), with the model downloaded:
+
+  ```
+  ollama pull qwen3:4b-instruct
+  ```
+
+  Use an "instruct" model: it answers right away. A "thinking" model (like plain `qwen3:4b`) writes a
+  long explanation to itself first, so every answer takes minutes. It runs well on a 4 GB GPU.
 
 ## First-time setup
 
@@ -78,8 +104,12 @@ Use the docs page at http://localhost:8001/docs (it keeps the cookie for you), o
 ```
 curl -c cookies.txt -H "Content-Type: application/json" -d "{\"email\":\"sara.wilson@gatekeeper.local\",\"password\":\"Password123!\"}" http://localhost:8001/auth/login
 curl -b cookies.txt http://localhost:8001/me
+curl -b cookies.txt -H "Content-Type: application/json" -d "{\"message\":\"What is my job title?\"}" http://localhost:8001/chat
 curl -b cookies.txt -X POST http://localhost:8001/auth/logout
 ```
+
+The chat answer also lists the tools it used: `{"reply": "...", "tool_calls": ["get_my_profile"]}`.
+Each message is answered on its own for now: the agent doesn't remember earlier messages yet.
 
 ## Run the tests
 
@@ -87,5 +117,8 @@ curl -b cookies.txt -X POST http://localhost:8001/auth/logout
 python -m pytest
 ```
 
-The tests don't need the backend running: `tests/fake_crud_api.py` pretends to be the CRUD API
-(using `httpx.MockTransport`) and remembers every request, so a test can check exactly what was sent.
+The tests need neither the backend nor Ollama:
+- `tests/fake_crud_api.py` pretends to be the CRUD API (using `httpx.MockTransport`) and remembers
+  every request, so a test can check exactly what was sent.
+- `tests/fake_llm.py` is a fake AI model that follows a script and remembers everything it was
+  sent, so a test can check that the token and the home address never reach the AI.

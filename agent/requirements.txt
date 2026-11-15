@@ -3,5 +3,9 @@ uvicorn==0.34.0
 httpx==0.28.1
 python-dotenv==1.0.1
 
+# The AI part: LlamaIndex, talking to a local model in Ollama
+llama-index-core==0.14.25
+llama-index-llms-ollama==0.11.0
+
 # Testing (only needed to run the tests)
 pytest==8.3.4

@@ -12,12 +12,17 @@ EMAIL = "ravi@test.local"
 PASSWORD = "Password123!"
 REFRESH_TOKEN = "refresh-token-1"
 ME = {"id": 3, "email": EMAIL, "kind": "user", "employee_id": 7, "role": "employee"}
+EMPLOYEE = {"id": 7, "name": "Ravi Report", "email": EMAIL, "job_title": "Developer", "department_id": 1,
+            "manager_id": 2, "employment_status": "active", "start_date": "2024-01-15",
+            "termination_date": None, "phone": "+1 555 0100", "home_address": "1 Secret Street",
+            "created_at": "2024-01-15T09:00:00Z", "updated_at": "2024-01-15T09:00:00Z"}
 
 
 class FakeCrudApi:
     def __init__(self) -> None:
         self.access_token = "access-token-1"  # the only access token that works right now
         self.refresh_works = True             # set to False to pretend the login has ended
+        self.employee_status = 200            # set to e.g. 403 to pretend the CRUD API says no
         self.requests: list[httpx.Request] = []
 
     def expire_access_token(self) -> None:
@@ -43,10 +48,17 @@ class FakeCrudApi:
                 return httpx.Response(200, json={"access_token": self.access_token})
             return httpx.Response(401, json={"detail": "Invalid token"})
 
-        if path == "/me":
-            if request.headers.get("Authorization") == f"Bearer {self.access_token}":
-                return httpx.Response(200, json=ME)
+        # Everything below needs a valid token, just like the real CRUD API.
+        if request.headers.get("Authorization") != f"Bearer {self.access_token}":
             return httpx.Response(401, json={"detail": "Invalid or expired token"})
+
+        if path == "/me":
+            return httpx.Response(200, json=ME)
+
+        if path == "/employees/7":
+            if self.employee_status != 200:
+                return httpx.Response(self.employee_status, json={"detail": "Not allowed"})
+            return httpx.Response(200, json=EMPLOYEE)
 
         return httpx.Response(404, json={"detail": "Not Found"})
 

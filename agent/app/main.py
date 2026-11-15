@@ -3,17 +3,18 @@
 #   Chat UI (React)  -->  agent service (this)  -->  CRUD API  -->  database
 #
 # The AI proposes, the API decides: this service never touches the database.
-# Right now it has login, logout and "who am I?". The AI and the tools come in the next steps.
+# It has login, logout, "who am I?" and the chat itself (POST /chat).
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from app import crud_api
-from app.routers import auth
+from app.routers import auth, chat
 
 app = FastAPI(title="Gatekeeper HR Agent")
 
 app.include_router(auth.router)
+app.include_router(chat.router)
 
 
 @app.exception_handler(crud_api.CrudApiError)
