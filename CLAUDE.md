@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project status
 
-Project name: **Gatekeeper HR**. Being built step by step, backend (CRUD API + database) first; the agent service and React frontend come later. The authoritative design is the build spec doc "Secure AI Database Assistant — Build Spec": https://claude.ai/artifact/1ADs6yz96sNXaoCd39ZMPi (read it with the Claude Docs tools, not web fetch). When the spec and this file disagree, the spec wins; update this file.
+Project name: **Gatekeeper HR**. Being built step by step: the backend (CRUD API + database, `backend/`) is done and tested; the agent service (`agent/`) is being started (only a `/health` check so far); the React frontend comes later. The authoritative design is the build spec doc "Secure AI Database Assistant — Build Spec": https://claude.ai/artifact/1ADs6yz96sNXaoCd39ZMPi (read it with the Claude Docs tools, not web fetch). When the spec and this file disagree, the spec wins; update this file.
 
 **Code style:** the owner makes tutorial videos from this code. Keep it super simple and beginner-readable: plain explicit code, short files, comments explaining the why, no clever abstractions. Build one small step at a time and stop for review; don't build several features at once.
 
@@ -25,6 +25,17 @@ python -m venv .venv
 ```
 
 Tests (`backend/tests/`, pytest + FastAPI `TestClient`): `conftest.py` points `DATABASE_URL` at `TEST_DATABASE_URL` (a separate `gatekeeper_hr_test` DB; it refuses to run unless the name ends in `_test`) **before importing `app`**, runs `alembic upgrade head` once per session, and the `db` fixture TRUNCATEs every table before each test; `client` depends on `db`. Test data is created with plain functions in `tests/helpers.py` (`create_employee`, `create_login`, `create_superuser`, `log_in`; one shared bcrypt hash for speed). Tests must also pass strict Pyright (annotate fixtures and test parameters).
+
+Agent service (run from `agent/`; its own `.venv` and `.env` with `CRUD_API_URL`, no database settings):
+
+```
+python -m venv .venv
+.venv\Scripts\python -m pip install -r requirements.txt
+.venv\Scripts\python -m uvicorn app.main:app --reload --port 8001   # backend must run on 8000 first
+.venv\Scripts\python -m pytest                                      # tests don't need the backend
+```
+
+`app/config.py` reads settings, `app/crud_api.py` is the only place that calls the CRUD API (httpx, 10 s timeout), `app/main.py` is the FastAPI app. Tests replace CRUD API calls with `monkeypatch` instead of starting the backend.
 
 Migrations (Alembic, run from `backend/`):
 
