@@ -68,7 +68,13 @@ def get_new_access_token(session: ChatSession) -> Optional[str]:
     return response.json()["access_token"]
 
 
-def call(session: ChatSession, method: str, path: str, json: Optional[dict[str, Any]] = None) -> Any:
+def call(
+    session: ChatSession,
+    method: str,
+    path: str,
+    json: Optional[dict[str, Any]] = None,    # the request body, for POST and PATCH
+    params: Optional[dict[str, Any]] = None,  # the "?status=pending" part of the URL
+) -> Any:
     """Call the CRUD API as the logged-in user, for example call(session, "GET", "/me").
 
     - The user's own token goes in the Authorization header, so the CRUD API checks THEIR permissions.
@@ -80,7 +86,7 @@ def call(session: ChatSession, method: str, path: str, json: Optional[dict[str, 
 
     def send() -> httpx.Response:
         headers = {"Authorization": f"Bearer {session.access_token}", "X-Request-Source": "agent"}
-        return http.request(method, path, json=json, headers=headers)
+        return http.request(method, path, json=json, params=params, headers=headers)
 
     try:
         response = send()

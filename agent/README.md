@@ -9,8 +9,17 @@ Chat UI (React)  -->  agent service (this folder)  -->  CRUD API (../backend)  -
 **The AI proposes, the API decides.** This service has no database password. It reaches HR data only
 through the CRUD API, using the logged-in user's token, so it can never do more than that user.
 
-It has login, logout, "who am I?" and a chat with one read-only tool (`get_my_profile`).
-More tools come in the next steps.
+It has login, logout, "who am I?" and a chat with four read-only tools, all about the logged-in user:
+
+| Tool | Answers questions like | What reaches the AI |
+| --- | --- | --- |
+| `get_my_profile` | "What is my job title?" | profile, **without** home address |
+| `get_my_leave` | "How many sick days did I take?" | type, dates, days, status, **without** the reason |
+| `get_my_salary` | "What is my current salary?" | amount and effective date |
+| `get_my_reviews` | "What did my last review say?" | period, rating, comments, reviewer id |
+
+None of them takes an employee id: whose data it is always comes from the login.
+Tools for managers and HR come in the next steps.
 
 ## How a chat message is answered
 
