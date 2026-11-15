@@ -101,7 +101,8 @@ def test_an_unknown_tool_is_refused(client: TestClient, fake_api: FakeCrudApi, f
     chat(client, "Show all salaries")
 
     assert "no tool with that name" in fake_llm.last_tool_result()
-    assert len(fake_api.requests) == calls_before  # the CRUD API was never called
+    # The only call to the CRUD API was the permissions check at the start of the message.
+    assert crud_paths(fake_api)[calls_before:] == ["/me/permissions"]
 
 
 def test_made_up_arguments_are_refused(client: TestClient, fake_api: FakeCrudApi, fake_llm: FakeLLM) -> None:
@@ -113,7 +114,7 @@ def test_made_up_arguments_are_refused(client: TestClient, fake_api: FakeCrudApi
     chat(client, "Show the profile of employee 99")
 
     assert "wrong arguments" in fake_llm.last_tool_result()
-    assert len(fake_api.requests) == calls_before
+    assert crud_paths(fake_api)[calls_before:] == ["/me/permissions"]
 
 
 def test_when_the_crud_api_says_no_the_model_is_told_why(

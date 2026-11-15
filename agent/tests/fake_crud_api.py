@@ -5,6 +5,7 @@
 # so a test can check exactly what the agent service sent.
 
 import json
+from typing import Any
 
 import httpx
 
@@ -16,6 +17,13 @@ EMPLOYEE = {"id": 7, "name": "Ravi Report", "email": EMAIL, "job_title": "Develo
             "manager_id": 2, "employment_status": "active", "start_date": "2024-01-15",
             "termination_date": None, "phone": "+1 555 0100", "home_address": "1 Secret Street",
             "created_at": "2024-01-15T09:00:00Z", "updated_at": "2024-01-15T09:00:00Z"}
+EMPLOYEE_PERMISSIONS: dict[str, Any] = {
+    "kind": "user", "role": "employee", "is_manager": False,
+    "permissions": ["view_own_profile", "submit_leave"],
+    "descriptions": {"view_own_profile": "See your own employee profile",
+                     "submit_leave": "Ask for leave (annual, sick, unpaid or parental)"},
+}
+NO_PERMISSIONS: dict[str, Any] = {"kind": "user", "role": "employee", "is_manager": False, "permissions": [], "descriptions": {}}
 
 
 class FakeCrudApi:
@@ -23,6 +31,7 @@ class FakeCrudApi:
         self.access_token = "access-token-1"  # the only access token that works right now
         self.refresh_works = True             # set to False to pretend the login has ended
         self.employee_status = 200            # set to e.g. 403 to pretend the CRUD API says no
+        self.permissions: dict[str, Any] = EMPLOYEE_PERMISSIONS  # what GET /me/permissions answers
         self.requests: list[httpx.Request] = []
 
     def expire_access_token(self) -> None:
@@ -54,6 +63,9 @@ class FakeCrudApi:
 
         if path == "/me":
             return httpx.Response(200, json=ME)
+
+        if path == "/me/permissions":
+            return httpx.Response(200, json=self.permissions)
 
         if path == "/employees/7":
             if self.employee_status != 200:

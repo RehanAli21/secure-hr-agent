@@ -20,6 +20,7 @@ from app.permissions import (
     ROLE_DESCRIPTIONS,
     ROLE_PERMISSIONS,
     ROLES,
+    describe_permissions,
     require_confirmation,
     require_role,
 )
@@ -34,7 +35,12 @@ router = APIRouter(tags=["Roles"], dependencies=[Depends(get_current_user)])
 def list_roles():
     """All roles, with what each one may do."""
     return [
-        RoleInfo(name=role, description=ROLE_DESCRIPTIONS[role], permissions=ROLE_PERMISSIONS[role])
+        RoleInfo(
+            name=role,
+            description=ROLE_DESCRIPTIONS[role],
+            permissions=ROLE_PERMISSIONS[role],
+            descriptions=describe_permissions(ROLE_PERMISSIONS[role]),
+        )
         for role in ROLES
     ]
 
@@ -46,7 +52,8 @@ def my_permissions(
 ):
     """What the logged-in account may do. Worked out fresh on every request, never cached."""
     if isinstance(account, SuperUser):
-        return PermissionsOut(kind="superuser", role=None, is_manager=False, permissions=["everything"])
+        return PermissionsOut(kind="superuser", role=None, is_manager=False, permissions=["everything"],
+                              descriptions=describe_permissions(["everything"]))
 
     permissions = list(ROLE_PERMISSIONS[account.role])
 
@@ -66,7 +73,8 @@ def my_permissions(
             if permission not in permissions:
                 permissions.append(permission)
 
-    return PermissionsOut(kind="user", role=account.role, is_manager=is_manager, permissions=permissions)
+    return PermissionsOut(kind="user", role=account.role, is_manager=is_manager, permissions=permissions,
+                          descriptions=describe_permissions(permissions))
 
 
 @router.patch("/employees/{employee_id}/role", response_model=RoleOut)

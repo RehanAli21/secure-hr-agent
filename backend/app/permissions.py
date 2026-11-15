@@ -177,3 +177,42 @@ ROLE_PERMISSIONS = {
     "hr": EMPLOYEE_PERMISSIONS + HR_PERMISSIONS,
     "admin": EMPLOYEE_PERMISSIONS + HR_PERMISSIONS + ["grant_admin_role"],
 }
+
+# Every permission in plain words, so people (and the AI agent) understand them.
+PERMISSION_DESCRIPTIONS = {
+    # employee
+    "view_own_profile": "See your own employee profile",
+    "update_own_contact_details": "Change your own phone number and home address",
+    "view_own_salary": "See your own salary and its history",
+    "view_own_reviews": "See your own performance reviews",
+    "view_own_leave": "See your own leave requests",
+    "submit_leave": "Ask for leave (annual, sick, unpaid or parental)",
+    "cancel_own_leave": "Cancel your own leave: while it is pending, or approved but not started yet",
+    # manager (anyone with direct reports)
+    "view_reports_profiles": "See the profiles of the people who report to you",
+    "view_reports_leave": "See the leave requests of the people who report to you",
+    "decide_reports_leave": "Approve or reject the leave requests of the people who report to you",
+    "view_reports_reviews": "See the performance reviews of the people who report to you",
+    "write_reports_reviews": "Write performance reviews for the people who report to you",
+    # hr
+    "view_all_employees": "See every employee",
+    "create_employee": "Add new employees",
+    "update_employee": "Change employee details such as job title, department and manager",
+    "terminate_employee": "Terminate employees (this also disables their login)",
+    "view_all_salaries": "See everyone's salaries",
+    "change_salary": "Set a new salary for an employee (but not your own)",
+    "change_role": "Change someone's role (but not your own)",
+    "manage_departments": "Create, rename and delete departments",
+    "delete_records": "Delete departments and performance reviews (they can be restored)",
+    "restore_records": "Restore deleted departments and performance reviews",
+    "view_audit_log": "Read the audit log of every change",
+    # admin
+    "grant_admin_role": "Give someone the admin role, or take it away",
+    # superuser
+    "everything": "Do everything: a superuser skips all permission checks",
+}
+
+
+def describe_permissions(permissions: list[str]) -> dict[str, str]:
+    """{"submit_leave": "Ask for leave (...)", ...} for the given permission names."""
+    return {permission: PERMISSION_DESCRIPTIONS[permission] for permission in permissions}

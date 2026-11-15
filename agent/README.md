@@ -16,7 +16,8 @@ More tools come in the next steps.
 
 ```
 POST /chat "What is my job title?"
-  1. The model gets: the rules (system prompt) + the message + the list of tools
+  0. The agent asks the CRUD API what this user may do (GET /me/permissions), fresh every time
+  1. The model gets: the rules + the user's permissions + the message + only the tools they may use
   2. The model asks: "call get_my_profile"
   3. The agent checks the tool name and its arguments, then runs it:
        get_my_profile -> CRUD API /me and /employees/{id}, with the user's own token
@@ -28,6 +29,10 @@ POST /chat "What is my job title?"
   session without it ever being a parameter the model sees.
 - A made-up tool name or argument is refused before anything runs.
 - At most 8 tool calls per message, so a confused model can't loop forever.
+- **Live permissions:** because they are fetched on every message, a role change counts from the next
+  message. The model uses them to answer "what can I change?", and each tool is only offered to users
+  with the permission it needs (`TOOL_PERMISSIONS` in `app/tools.py`). That filter is only for a better
+  experience: the CRUD API still checks every call.
 
 ## How login works
 

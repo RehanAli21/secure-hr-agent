@@ -23,6 +23,12 @@ PROFILE_FIELDS = ["id", "name", "email", "job_title", "department_id", "manager_
                   "employment_status", "start_date", "phone"]
 
 
+# Which permission (from GET /me/permissions) each tool needs. A tool missing here is never offered.
+TOOL_PERMISSIONS = {
+    "get_my_profile": "view_own_profile",
+}
+
+
 def keep_only(record: dict[str, Any], fields: list[str]) -> dict[str, Any]:
     """Copy just the allowed fields, e.g. keep_only({"a": 1, "b": 2}, ["a"]) -> {"a": 1}."""
     return {name: record[name] for name in fields if name in record}
@@ -34,8 +40,8 @@ class NoArgs(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-def make_tools(session: ChatSession) -> list[FunctionTool]:
-    """Build the tools for one logged-in user."""
+def make_tools(session: ChatSession, permissions: list[str]) -> list[FunctionTool]:
+    """Build the tools for one logged-in user: only the ones their permissions allow."""
 
     def get_my_profile() -> str:
         """Get the logged-in user's own employee profile: name, email, job title,
@@ -47,6 +53,10 @@ def make_tools(session: ChatSession) -> list[FunctionTool]:
         employee = crud_api.call(session, "GET", f"/employees/{me['employee_id']}")
         return json.dumps(keep_only(employee, PROFILE_FIELDS))
 
-    return [
+    all_tools = [
         FunctionTool.from_defaults(fn=get_my_profile, fn_schema=NoArgs),
     ]
+
+    # Only offer the tools this user may use, so the AI doesn't offer things that would fail.
+    # This is only for a better experience: the CRUD API still checks every single call itself.
+    return [tool for tool in all_tools if TOOL_PERMISSIONS.get(tool.metadata.get_name()) in permissions]

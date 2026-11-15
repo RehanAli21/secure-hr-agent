@@ -38,6 +38,10 @@ class FakeLLM:
         texts += [repr(tool.metadata) for tool in self.seen_tools]
         return "\n".join(texts)
 
+    def system_prompt(self) -> str:
+        """The system prompt (the rules) of the last call."""
+        return self.seen_messages[-1][0].content or ""
+
     def last_tool_result(self) -> str:
         """The content of the last tool result the model was given."""
         tool_messages = [m for m in self.seen_messages[-1] if m.role == MessageRole.TOOL]

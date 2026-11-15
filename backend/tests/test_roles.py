@@ -4,6 +4,7 @@
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
+from app.permissions import MANAGER_PERMISSIONS, PERMISSION_DESCRIPTIONS, ROLE_PERMISSIONS
 from tests.helpers import Org, as_agent, create_employee, create_login, create_superuser, log_in
 
 
@@ -46,6 +47,22 @@ def test_being_a_manager_is_worked_out_live(client: TestClient, db: Session, org
     hana_now = client.get("/me/permissions", headers=hana).json()
     assert hana_now["is_manager"] is True
     assert "decide_reports_leave" in hana_now["permissions"]
+
+
+def test_every_permission_has_a_description() -> None:
+    # If someone adds a permission and forgets its description, this test fails.
+    all_permissions = set(MANAGER_PERMISSIONS + ["everything"])
+    for permissions in ROLE_PERMISSIONS.values():
+        all_permissions.update(permissions)
+
+    assert all_permissions == set(PERMISSION_DESCRIPTIONS)
+
+
+def test_my_permissions_come_with_descriptions(client: TestClient, org: Org) -> None:
+    ravi = client.get("/me/permissions", headers=log_in(client, org.report.email)).json()
+
+    assert set(ravi["descriptions"]) == set(ravi["permissions"])
+    assert ravi["descriptions"]["submit_leave"].startswith("Ask for leave")
 
 
 def test_a_superuser_may_do_everything(client: TestClient, db: Session) -> None:

@@ -198,6 +198,7 @@ class RoleInfo(BaseModel):
     name: str
     description: str
     permissions: list[str]
+    descriptions: dict[str, str]  # each permission in plain words, e.g. {"submit_leave": "Ask for leave ..."}
 
 
 class PermissionsOut(BaseModel):
@@ -205,6 +206,7 @@ class PermissionsOut(BaseModel):
     role: Optional[str]   # superusers have no role
     is_manager: bool      # True if someone reports directly to you
     permissions: list[str]
+    descriptions: dict[str, str]  # each permission in plain words
 
 
 # ---------- Audit log ----------
