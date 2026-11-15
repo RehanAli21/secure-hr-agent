@@ -68,7 +68,7 @@ def test_the_agent_looks_up_my_profile_through_the_crud_api(
     # ...and the model got the result back, marked as data.
     result = fake_llm.last_tool_result()
     assert result.startswith("<tool_result>") and result.endswith("</tool_result>")
-    assert '"job_title": "Developer"' in result
+    assert '"job_title":"Developer"' in result
 
 
 def test_the_home_address_never_reaches_the_ai(client: TestClient, fake_llm: FakeLLM) -> None:

@@ -137,6 +137,7 @@ def submit_leave(
 @router.get("", response_model=list[LeaveOut])
 def list_leave(
     employee_id: Optional[int] = None,     # only one employee's leave
+    manager_id: Optional[int] = None,      # only the leave of the people who report to this manager
     status: Optional[LeaveStatus] = None,  # e.g. only "pending"
     limit: int = Query(default=20, ge=1, le=100),
     db: Session = Depends(get_db),
@@ -151,6 +152,8 @@ def list_leave(
 
     if employee_id is not None:
         query = query.filter(LeaveRequest.employee_id == employee_id)
+    if manager_id is not None:
+        query = query.filter(Employee.manager_id == manager_id)
     if status is not None:
         query = query.filter(LeaveRequest.status == status)
 

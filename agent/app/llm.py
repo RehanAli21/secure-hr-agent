@@ -12,13 +12,15 @@ from llama_index.core.tools import FunctionTool
 # We switch off ONLY that one warning, ONLY on this line.
 from llama_index.llms.ollama import Ollama  # pyright: ignore[reportMissingTypeStubs]
 
-from app.config import OLLAMA_MODEL, OLLAMA_URL
+from app.config import OLLAMA_CONTEXT, OLLAMA_MODEL, OLLAMA_URL
 
 llm = Ollama(
     model=OLLAMA_MODEL,
     base_url=OLLAMA_URL,
     temperature=0,          # same question -> (almost) the same answer; no creative guessing
-    context_window=8192,    # how much text the model reads at once; small enough for a 4 GB GPU
+    # How much text the model reads at once, from .env (4096 = about 3,000 words). Bigger needs
+    # more GPU memory: with 8192 the model no longer fit in a 4 GB GPU, half ran on the CPU, ~3x slower.
+    context_window=OLLAMA_CONTEXT,
     request_timeout=120,    # small local models can be slow, give them 2 minutes
 )
 # Use a model that answers right away (like qwen3:4b-instruct), not a "thinking" model.
@@ -32,6 +34,8 @@ def ask_llm(messages: list[ChatMessage], tools: list[FunctionTool]) -> ChatMessa
     """
     try:
         response = llm.chat_with_tools(tools, chat_history=messages)
-    except (ConnectionError, httpx.HTTPError, ollama.ResponseError):  # not running, timeout, model missing...
+    except (ConnectionError, httpx.HTTPError):  # not running, wrong address, timeout...
         raise HTTPException(status_code=503, detail="The AI model is not reachable. Is Ollama running?")
+    except ollama.ResponseError as error:  # Ollama runs, but refused: e.g. too much text, model missing
+        raise HTTPException(status_code=503, detail=f"The AI model could not answer: {error.error}")
     return response.message

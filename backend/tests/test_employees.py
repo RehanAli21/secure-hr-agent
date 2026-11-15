@@ -80,6 +80,19 @@ def test_a_superuser_sees_everyone(client: TestClient, db: Session, org: Org) ->
     assert len(response.json()) == 4
 
 
+def test_the_list_can_show_only_one_managers_team(client: TestClient, org: Org) -> None:
+    response = client.get(f"/employees?manager_id={org.manager.id}", headers=log_in(client, org.hr.email))
+
+    assert ids_in(response.json()) == {org.report.id}
+
+
+def test_the_team_filter_never_shows_more_than_you_may_see(client: TestClient, org: Org) -> None:
+    # Omar asks for Mona's team. He may only see himself, so he gets nobody.
+    response = client.get(f"/employees?manager_id={org.manager.id}", headers=log_in(client, org.stranger.email))
+
+    assert response.json() == []
+
+
 def test_the_list_never_returns_more_than_100_rows(client: TestClient, org: Org) -> None:
     response = client.get("/employees?limit=101", headers=log_in(client, org.hr.email))
 

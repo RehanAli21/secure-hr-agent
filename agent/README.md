@@ -9,7 +9,7 @@ Chat UI (React)  -->  agent service (this folder)  -->  CRUD API (../backend)  -
 **The AI proposes, the API decides.** This service has no database password. It reaches HR data only
 through the CRUD API, using the logged-in user's token, so it can never do more than that user.
 
-It has login, logout, "who am I?" and a chat with four read-only tools, all about the logged-in user:
+It has login, logout, "who am I?" and a chat with eight read-only tools. Four are about the logged-in user:
 
 | Tool | Answers questions like | What reaches the AI |
 | --- | --- | --- |
@@ -18,8 +18,31 @@ It has login, logout, "who am I?" and a chat with four read-only tools, all abou
 | `get_my_salary` | "What is my current salary?" | amount and effective date |
 | `get_my_reviews` | "What did my last review say?" | period, rating, comments, reviewer id |
 
-None of them takes an employee id: whose data it is always comes from the login.
-Tools for managers and HR come in the next steps.
+Two are for managers (anyone with people reporting to them):
+
+| Tool | Answers questions like | What reaches the AI |
+| --- | --- | --- |
+| `get_my_team` | "Who is in my team?", "What is Yusuf's job title?" | current team members, no home addresses |
+| `get_team_leave` | "Who is off in December?", "What is waiting for me?" | current and upcoming leave, with names, no reasons |
+
+None of these six takes an employee id: whose data it is always comes from the login.
+
+Two are for HR and admins (permission `view_all_employees`):
+
+| Tool | Answers questions like | What reaches the AI |
+| --- | --- | --- |
+| `search_employees` | "Who is Leila Ali's manager?", "What is Yusuf's job title?" | one match: the full profile; several: a short list to choose from (at most 10) |
+| `get_employee` | "Show employee 87" | the full profile, with department and manager **names**, no home address |
+
+**Ask, never guess:** when a name matches several people (there are two Yusuf Browns!), the agent
+lists them and asks which one. It never picks one itself.
+
+**About the small local model:** the context window (how much text the model reads at once) is
+`OLLAMA_CONTEXT` in `.env`, 4096 tokens by default (about 3,000 words). It wins over the "context
+length" slider in the Ollama app. With a 4 GB GPU, anything bigger makes part of the model run on
+the CPU, about 3 times slower; with a bigger GPU you can raise it (`.env.example` has a table, and
+`ollama ps` shows where the model runs). Because the window is small, the tools send as little as
+possible: compact JSON, only the fields needed, and no old leave for managers.
 
 ## How a chat message is answered
 

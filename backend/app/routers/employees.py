@@ -124,11 +124,13 @@ def create_employee(
 def list_employees(
     name: Optional[str] = None,           # search by part of a name, e.g. "ali"
     department_id: Optional[int] = None,  # only show one department
+    manager_id: Optional[int] = None,     # only show the people who report to this manager
     limit: int = Query(default=20, ge=1, le=100),  # never return more than 100 rows
     db: Session = Depends(get_db),
     account: Account = Depends(get_current_user),
 ):
     # Start with only the employees this account may see, then apply the search filters.
+    # The filters can only make the list SHORTER, never show someone you may not see.
     query = only_visible_employees(db.query(Employee), account)
 
     if name is not None:
@@ -136,6 +138,8 @@ def list_employees(
         query = query.filter(Employee.name.ilike(f"%{name}%"))
     if department_id is not None:
         query = query.filter(Employee.department_id == department_id)
+    if manager_id is not None:
+        query = query.filter(Employee.manager_id == manager_id)
 
     employees = query.order_by(Employee.name).limit(limit).all()
     return [to_employee_out(account, employee) for employee in employees]

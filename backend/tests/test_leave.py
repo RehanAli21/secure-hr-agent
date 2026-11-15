@@ -101,6 +101,17 @@ def test_the_leave_list_only_shows_leave_you_may_see(client: TestClient, org: Or
     assert len(hr_list) == 2
 
 
+def test_the_leave_list_can_show_only_one_managers_team(client: TestClient, org: Org) -> None:
+    submit_leave(client, log_in(client, org.report.email))
+    submit_leave(client, log_in(client, org.stranger.email))
+
+    team_leave = client.get(f"/leave?manager_id={org.manager.id}", headers=log_in(client, org.hr.email)).json()
+    by_stranger = client.get(f"/leave?manager_id={org.manager.id}", headers=log_in(client, org.stranger.email)).json()
+
+    assert [row["employee_id"] for row in team_leave] == [org.report.id]
+    assert by_stranger == []  # the filter never shows more than you may see
+
+
 # ---------- Approving and rejecting ----------
 
 def test_the_manager_approves_their_reports_leave(client: TestClient, org: Org) -> None:
