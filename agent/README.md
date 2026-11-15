@@ -9,7 +9,23 @@ Chat UI (React)  -->  agent service (this folder)  -->  CRUD API (../backend)  -
 **The AI proposes, the API decides.** This service has no database password. It reaches HR data only
 through the CRUD API, using the logged-in user's token, so it can never do more than that user.
 
-Right now it only has a health check. The AI and its tools come in the next steps.
+Right now it has login, logout and "who am I?". The AI and its tools come in the next steps.
+
+## How login works
+
+```
+1. Login form  --email + password-->  agent service  --->  CRUD API /auth/login
+2.                                    agent service  <---  access + refresh token
+3. Browser  <--cookie: session_id (random)--  agent service keeps the tokens in its memory
+4. Browser  --cookie-->  agent service  --Authorization: Bearer <token>-->  CRUD API
+```
+
+- The **tokens never leave the agent service**: the browser only gets a random session id, in an
+  `httponly` cookie that JavaScript can't read. Later, the AI won't see the tokens either.
+- The access token lasts 15 minutes. When it runs out, the agent service gets a new one with the
+  refresh token by itself, so the user stays logged in (for up to 7 days).
+- Sessions live in memory: **restarting the agent service logs everyone out.**
+- Only normal users can log in here. Superusers use the CRUD API directly.
 
 ## What you need
 
@@ -55,10 +71,21 @@ Check it at http://localhost:8001/health:
 - `{"status": "ok", "crud_api": "unreachable"}`: this service is fine, but the backend is not running
   (or `CRUD_API_URL` is wrong).
 
+## Try logging in
+
+Use the docs page at http://localhost:8001/docs (it keeps the cookie for you), or curl:
+
+```
+curl -c cookies.txt -H "Content-Type: application/json" -d "{\"email\":\"sara.wilson@gatekeeper.local\",\"password\":\"Password123!\"}" http://localhost:8001/auth/login
+curl -b cookies.txt http://localhost:8001/me
+curl -b cookies.txt -X POST http://localhost:8001/auth/logout
+```
+
 ## Run the tests
 
 ```
 python -m pytest
 ```
 
-The tests don't need the backend running.
+The tests don't need the backend running: `tests/fake_crud_api.py` pretends to be the CRUD API
+(using `httpx.MockTransport`) and remembers every request, so a test can check exactly what was sent.

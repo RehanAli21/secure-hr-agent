@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project status
 
-Project name: **Gatekeeper HR**. Being built step by step: the backend (CRUD API + database, `backend/`) is done and tested; the agent service (`agent/`) is being started (only a `/health` check so far); the React frontend comes later. The authoritative design is the build spec doc "Secure AI Database Assistant — Build Spec": https://claude.ai/artifact/1ADs6yz96sNXaoCd39ZMPi (read it with the Claude Docs tools, not web fetch). When the spec and this file disagree, the spec wins; update this file.
+Project name: **Gatekeeper HR**. Being built step by step: the backend (CRUD API + database, `backend/`) is done and tested; the agent service (`agent/`) is being started (login/logout/`/me` with server-side sessions so far, no LLM yet); the React frontend comes later. The authoritative design is the build spec doc "Secure AI Database Assistant — Build Spec": https://claude.ai/artifact/1ADs6yz96sNXaoCd39ZMPi (read it with the Claude Docs tools, not web fetch). When the spec and this file disagree, the spec wins; update this file.
 
 **Code style:** the owner makes tutorial videos from this code. Keep it super simple and beginner-readable: plain explicit code, short files, comments explaining the why, no clever abstractions. Build one small step at a time and stop for review; don't build several features at once.
 
@@ -35,7 +35,7 @@ python -m venv .venv
 .venv\Scripts\python -m pytest                                      # tests don't need the backend
 ```
 
-`app/config.py` reads settings, `app/crud_api.py` is the only place that calls the CRUD API (httpx, 10 s timeout), `app/main.py` is the FastAPI app. Tests replace CRUD API calls with `monkeypatch` instead of starting the backend.
+`app/config.py` reads settings; `app/main.py` is the FastAPI app (a `CrudApiError` handler passes the CRUD API's status + detail through unchanged). `app/crud_api.py` is the only place that calls the CRUD API and the only code that touches tokens: one module-level `httpx.Client` (`http`, 10 s timeout); `call(session, method, path, json)` sends `Authorization: Bearer` + `X-Request-Source: agent`, and on a 401 refreshes once and retries. `app/sessions.py`: in-memory `SESSIONS` dict, session id → `ChatSession(access_token, refresh_token)` with `repr=False` on both; the browser gets only a random `session_id` httpOnly cookie; `current_session` dependency → 401 "Please log in". `routers/auth.py`: `POST /auth/login` (normal users only), `POST /auth/logout`, `GET /me`. Tests use `tests/fake_crud_api.py` (`FakeCrudApi` behind `httpx.MockTransport`, records `requests`; `expire_access_token()`, `refresh_works`), swapped in by the `fake_api` fixture, which also clears `SESSIONS`.
 
 Migrations (Alembic, run from `backend/`):
 
@@ -69,6 +69,7 @@ An HR assistant chatbot: employees, managers, HR staff and admins read and chang
 | --- | --- |
 | Frontend (chat UI, login form, confirm dialog) | React + TypeScript |
 | Agent service | Python, FastAPI, LlamaIndex |
+| LLM | Local models through Ollama (`http://localhost:11434`), via LlamaIndex's Ollama integration; no cloud LLM API keys |
 | CRUD API (the security boundary; issues JWT access + refresh tokens) | Python, FastAPI, SQLAlchemy, Pydantic |
 | Database (app data, pending actions, audit log; pgvector when RAG is on) | PostgreSQL |
 | Local setup | Docker Compose |

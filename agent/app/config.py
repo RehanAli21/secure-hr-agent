@@ -8,8 +8,8 @@ load_dotenv()
 
 # Where the CRUD API lives, for example http://localhost:8000
 # This is the ONLY way the agent service reaches HR data. It has no database password.
-CRUD_API_URL = os.getenv("CRUD_API_URL")
+CRUD_API_URL = os.getenv("CRUD_API_URL", "")
 
 # Stop right away with a clear message if the setting is missing.
-if CRUD_API_URL is None:
+if CRUD_API_URL == "":
     raise RuntimeError("CRUD_API_URL is missing. Copy .env.example to .env and fill it in.")
