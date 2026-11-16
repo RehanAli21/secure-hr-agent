@@ -9,12 +9,13 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from app import crud_api
-from app.routers import auth, chat
+from app.routers import actions, auth, chat
 
 app = FastAPI(title="Gatekeeper HR Agent")
 
 app.include_router(auth.router)
 app.include_router(chat.router)
+app.include_router(actions.router)
 
 
 @app.exception_handler(crud_api.CrudApiError)

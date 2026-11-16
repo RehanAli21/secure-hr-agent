@@ -11,7 +11,7 @@
 
 import secrets
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Any, Optional
 
 from fastapi import Cookie, HTTPException
 from llama_index.core.base.llms.types import ChatMessage
@@ -33,6 +33,9 @@ class ChatSession:
     # The chat so far (see app/memory.py): a list of turns, each turn a list of messages.
     # Also repr=False: it holds HR data from the tool results.
     history: list[list[ChatMessage]] = field(default_factory=empty_history, repr=False)
+    # A big change the agent proposed in the CURRENT message (e.g. a new salary), waiting for the
+    # user's Confirm button. Set by the tool, sent to the page with the reply (see app/agent.py).
+    proposed_action: Optional[dict[str, Any]] = field(default=None, repr=False)
 
 
 # session id -> that user's tokens and chat

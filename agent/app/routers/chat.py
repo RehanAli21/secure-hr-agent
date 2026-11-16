@@ -1,6 +1,8 @@
 # The chat endpoints: the chat UI sends one message, and gets the assistant's answer back.
 # The agent remembers the last few messages of the chat (app/memory.py), until "new chat" or logout.
 
+from typing import Optional
+
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -17,16 +19,25 @@ class ChatRequest(BaseModel):
     message: str = Field(min_length=1, max_length=2000)  # a cap, so nobody sends a whole book
 
 
+class PendingAction(BaseModel):
+    """A big change waiting for the user: the page shows the summary with a Confirm button."""
+    id: int
+    summary: str     # written by the CRUD API from the real data, never by the AI
+    expires_at: str  # confirm before this time (5 minutes)
+
+
 class ChatReply(BaseModel):
     reply: str
     tool_calls: list[str]  # which tools the agent used, e.g. ["get_my_profile"]
+    pending_action: Optional[PendingAction] = None
 
 
 @router.post("/chat", response_model=ChatReply)
 def chat(data: ChatRequest, session: ChatSession = Depends(current_session)):
     """Send one message. You must be logged in: the agent works as YOU, with your permissions."""
     result = run_turn(session, data.message)
-    return ChatReply(reply=result.reply, tool_calls=result.tool_calls)
+    pending = PendingAction(**result.pending_action) if result.pending_action else None
+    return ChatReply(reply=result.reply, tool_calls=result.tool_calls, pending_action=pending)
 
 
 @router.post("/chat/new")

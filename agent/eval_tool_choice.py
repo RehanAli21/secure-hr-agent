@@ -57,6 +57,7 @@ CASES = {
         ("What is Yusuf Brown's job title?", "search_employees"),
         ("When did Leila Ali start?", "search_employees"),
         ("Show employee 87", "get_employee"),
+        ("Give Leila Ali a salary of 170000 from 1 January 2027", "search_employees"),  # look her up first
         ("What is my salary?", "get_my_salary"),
         ("What can I change?", None),
     ]),

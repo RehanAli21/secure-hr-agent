@@ -74,18 +74,20 @@ def call(
     path: str,
     json: Optional[dict[str, Any]] = None,    # the request body, for POST and PATCH
     params: Optional[dict[str, Any]] = None,  # the "?status=pending" part of the URL
+    source: str = "agent",                    # "ui" ONLY for the Confirm/Cancel buttons (app/routers/actions.py)
 ) -> Any:
     """Call the CRUD API as the logged-in user, for example call(session, "GET", "/me").
 
     - The user's own token goes in the Authorization header, so the CRUD API checks THEIR permissions.
     - "X-Request-Source: agent" tells the CRUD API this came from the agent, so it is written in the
       audit log, and big changes are blocked unless the user confirms them in the app.
+      Every tool uses "agent". Only the Confirm and Cancel buttons send "ui": a person clicked.
     - The access token only lasts 15 minutes. If it has run out (401), we get a new one with the
       refresh token and try once more.
     """
 
     def send() -> httpx.Response:
-        headers = {"Authorization": f"Bearer {session.access_token}", "X-Request-Source": "agent"}
+        headers = {"Authorization": f"Bearer {session.access_token}", "X-Request-Source": source}
         return http.request(method, path, json=json, params=params, headers=headers)
 
     try:

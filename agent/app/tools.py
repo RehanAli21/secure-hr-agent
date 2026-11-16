@@ -15,6 +15,7 @@
 
 import json
 from datetime import date, timedelta
+from decimal import Decimal
 from typing import Any, Literal, Optional
 
 from llama_index.core.tools import FunctionTool
@@ -59,12 +60,15 @@ TOOL_PERMISSIONS = {
     "cancel_leave_request": "cancel_own_leave",
     "approve_leave_request": "decide_reports_leave",
     "reject_leave_request": "decide_reports_leave",
+    # hr and admin, big changes: they only PROPOSE, the user confirms in the app
+    "update_employee_salary": "change_salary",
 }
 
 # The tools that CHANGE something. Every other tool only reads.
 # The agent allows at most one change per message (see app/agent.py), and later the tools that
 # need the user's confirmation will be marked here too. The model never decides any of this.
-WRITE_TOOLS = {"submit_leave_request", "cancel_leave_request", "approve_leave_request", "reject_leave_request"}
+WRITE_TOOLS = {"submit_leave_request", "cancel_leave_request", "approve_leave_request", "reject_leave_request",
+               "update_employee_salary"}
 
 
 def keep_only(record: dict[str, Any], fields: list[str]) -> dict[str, Any]:
@@ -169,6 +173,15 @@ class WhichTeamLeave(BaseModel):
     # requests that are waiting, and decides nothing.
     employee_name: Optional[str] = Field(default=None, min_length=2, max_length=100)
     start_date: Optional[date] = None
+
+
+class NewSalary(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    employee_id: int = Field(gt=0)  # from search_employees: the preview shows the name before anyone confirms
+    # Decimal (not float) keeps money exact. The same limits as the CRUD API.
+    amount: Decimal = Field(gt=0, max_digits=12, decimal_places=2)
+    effective_date: date  # the day the new salary starts (it can be in the future)
 
 
 # ---------- The tools ----------
@@ -429,6 +442,34 @@ def make_tools(session: ChatSession, permissions: list[str]) -> list[FunctionToo
         Never use it to answer a question about leave."""
         return decide_team_leave("reject", employee_name, start_date)
 
+    # ---------- Big changes: the user must confirm them ----------
+    #
+    # These tools change NOTHING. They ask the CRUD API to store a "pending action" (POST /actions).
+    # The CRUD API builds a preview from the real data, and the chat page shows it with a Confirm
+    # button. Only that button (a person clicking) runs the change. The CRUD API refuses to run it
+    # for the agent, so even a tricked model can't skip this step.
+
+    def propose(action: str, target_id: int, args: dict[str, Any]) -> str:
+        """Store a pending action, and keep it on the session so the page can show the Confirm button."""
+        pending = crud_api.call(session, "POST", "/actions",
+                                json={"action": action, "target_id": target_id, "args": args})
+        session.proposed_action = {"id": pending["id"], "summary": pending["preview"]["summary"],
+                                   "expires_at": pending["expires_at"]}
+        return as_json({
+            "waiting_for_confirmation": pending["preview"]["summary"],
+            "note": "Nothing has changed yet. The user must check this and click Confirm in the app, "
+                    "within 5 minutes. Typing yes in the chat does not confirm.",
+        })
+
+    def update_employee_salary(employee_id: int, amount: Decimal, effective_date: date) -> str:
+        """Propose a new salary for an employee: the amount (a number, no currency) and the day it
+        starts (YYYY-MM-DD). This does NOT change the salary: the user must confirm it in the app.
+        Only use it when the user asks to change someone's salary ("give Sam Lee 90000 from
+        1 January"). The employee_id must come from search_employees. Never guess an id.
+        If the amount or the start date is missing, ask the user."""
+        return propose("change_salary", employee_id,
+                       {"amount": str(amount), "effective_date": effective_date.isoformat()})
+
     all_tools = [
         FunctionTool.from_defaults(fn=get_my_profile, fn_schema=NoArgs),
         FunctionTool.from_defaults(fn=get_my_leave, fn_schema=NoArgs),
@@ -442,6 +483,7 @@ def make_tools(session: ChatSession, permissions: list[str]) -> list[FunctionToo
         FunctionTool.from_defaults(fn=cancel_leave_request, fn_schema=LeaveStartDate),
         FunctionTool.from_defaults(fn=approve_leave_request, fn_schema=WhichTeamLeave),
         FunctionTool.from_defaults(fn=reject_leave_request, fn_schema=WhichTeamLeave),
+        FunctionTool.from_defaults(fn=update_employee_salary, fn_schema=NewSalary),
     ]
 
     # Only offer the tools this user may use, so the AI doesn't offer things that would fail.

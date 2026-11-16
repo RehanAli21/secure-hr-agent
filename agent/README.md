@@ -74,6 +74,30 @@ the CPU, about 3 times slower; with a bigger GPU you can raise it (`.env.example
 `ollama ps` shows where the model runs). Because the window is small, the tools send as little as
 possible: compact JSON, only the fields needed, and no old leave for managers.
 
+### Big changes: the user must click Confirm
+
+HR can change a salary in the chat, but the agent only **proposes** it:
+
+| Tool | Used for | What it sends to the CRUD API |
+| --- | --- | --- |
+| `update_employee_salary` | "Give Leila Ali 170000 from 1 January" (after looking her up) | a pending action (`POST /actions`): **nothing changes yet** |
+
+```
+You:    Give Leila Ali 170000 from 1 January 2027
+Agent:  (search_employees, then update_employee_salary)
+Reply:  {"reply": "...", "pending_action": {"id": 2, "summary": "Change the salary of Leila Ali from
+         163500.00 to 170000, starting 2027-01-01.", "expires_at": "..."}}
+Page:   shows the summary with Confirm and Cancel buttons
+Click:  POST /actions/2/confirm  ->  the CRUD API runs the change
+```
+
+- The **summary is written by the CRUD API** from the real records, never by the AI.
+- **Only a click confirms.** Typing "yes" is just a chat message. The model has no tool that confirms,
+  and the CRUD API refuses to confirm anything sent by the agent (`X-Request-Source: agent`); only the
+  Confirm and Cancel endpoints (`app/routers/actions.py`) send `ui`.
+- The CRUD API also checks: it is your action, not older than 5 minutes, used only once, and the record
+  did not change since the preview (409). After a click, the agent is told what happened.
+
 ## How a chat message is answered
 
 ```
@@ -197,7 +221,7 @@ curl -b cookies.txt -H "Content-Type: application/json" -d "{\"message\":\"What 
 curl -b cookies.txt -X POST http://localhost:8001/auth/logout
 ```
 
-The chat answer also lists the tools it used: `{"reply": "...", "tool_calls": ["get_my_profile"]}`.
+The chat answer also lists the tools it used: `{"reply": "...", "tool_calls": ["get_my_profile"], "pending_action": null}`.
 To start a new chat (the agent forgets the earlier messages, you stay logged in):
 
 ```

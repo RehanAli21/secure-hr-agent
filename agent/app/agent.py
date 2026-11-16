@@ -9,7 +9,7 @@
 
 from dataclasses import dataclass
 from datetime import date
-from typing import Any
+from typing import Any, Optional
 
 from llama_index.core.base.llms.types import ChatMessage, MessageRole, ToolCallBlock
 from llama_index.core.tools import FunctionTool
@@ -51,6 +51,10 @@ Rules:
   If something is not in the list, the user may not do it.
   If they ask you to do one of those things and you have no tool for it, say that you can't do it
   in the chat yet.
+- Big changes (like a new salary) are only PROPOSED: the app shows the user a Confirm button.
+  Never say that such a change is done. If the user types "yes", tell them to click Confirm.
+  Each time the user asks for a big change, call the tool again, even if you proposed it before:
+  an earlier proposal may have expired or been cancelled.
 - Keep your answers short and friendly."""
 
 
@@ -81,6 +85,8 @@ def rules_message(my_permissions: dict[str, Any]) -> ChatMessage:
 class TurnResult:
     reply: str
     tool_calls: list[str]  # the names of the tools it used, to show what the agent did
+    # A big change waiting for the user's Confirm button: {"id", "summary", "expires_at"}, or None.
+    pending_action: Optional[dict[str, Any]] = None
 
 
 def run_tool(tools: list[FunctionTool], call: ToolCallBlock) -> str:
@@ -112,6 +118,7 @@ def run_turn(session: ChatSession, user_message: str) -> TurnResult:
     """Answer one chat message for the logged-in user."""
     # Ask the CRUD API what this user may do, fresh on EVERY message (never cached),
     # so a role change counts from the very next message.
+    session.proposed_action = None  # a proposal belongs to the message that made it
     my_permissions = crud_api.call(session, "GET", "/me/permissions")
     tools = make_tools(session, my_permissions["permissions"])
 
@@ -130,14 +137,15 @@ def run_turn(session: ChatSession, user_message: str) -> TurnResult:
         if not tool_calls:
             turn.append(answer)
             memory.remember(session, turn)
-            return TurnResult(reply=answer.content or "", tool_calls=used_tools)
+            return TurnResult(reply=answer.content or "", tool_calls=used_tools,
+                              pending_action=session.proposed_action)
 
         # Loop limit: stop a confused model that keeps calling tools.
         if len(used_tools) + len(tool_calls) > MAX_TOOL_CALLS:
             reply = "Sorry, that took too many steps. Please ask in a simpler way."
             turn.append(ChatMessage(role=MessageRole.ASSISTANT, content=reply))
             memory.remember(session, turn)
-            return TurnResult(reply=reply, tool_calls=used_tools)
+            return TurnResult(reply=reply, tool_calls=used_tools, pending_action=session.proposed_action)
 
         # Remember that the model asked for these tools, then add each tool's result.
         turn.append(answer)

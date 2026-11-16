@@ -48,7 +48,7 @@ def test_a_plain_answer_uses_no_tools(client: TestClient, fake_llm: FakeLLM) -> 
 
     answer = chat(client, "Hello")
 
-    assert answer == {"reply": "Hi! I can help with your HR records.", "tool_calls": []}
+    assert answer == {"reply": "Hi! I can help with your HR records.", "tool_calls": [], "pending_action": None}
 
 
 # ---------- Using a tool ----------
@@ -61,7 +61,7 @@ def test_the_agent_looks_up_my_profile_through_the_crud_api(
 
     answer = chat(client, "What is my job title?")
 
-    assert answer == {"reply": "You are a Developer.", "tool_calls": ["get_my_profile"]}
+    assert answer == {"reply": "You are a Developer.", "tool_calls": ["get_my_profile"], "pending_action": None}
     # The tool asked the CRUD API, with the user's own token...
     assert crud_paths(fake_api)[-2:] == ["/me", "/employees/7"]
     assert fake_api.requests[-1].headers["Authorization"] == f"Bearer {fake_api.access_token}"

@@ -102,6 +102,7 @@ class FakeCrudApi:
         self.employee_status = 200            # set to e.g. 403 to pretend the CRUD API says no
         self.permissions: dict[str, Any] = EMPLOYEE_PERMISSIONS  # what GET /me/permissions answers
         self.requests: list[httpx.Request] = []
+        self.actions: dict[int, dict[str, Any]] = {}  # pending actions, by id (POST /actions)
 
     def expire_access_token(self) -> None:
         """Pretend 15 minutes have passed: the old access token stops working."""
@@ -149,6 +150,35 @@ class FakeCrudApi:
             created = {"id": 99, "employee_id": 7, **body, "reason": None, "status": "pending",
                        "approver_id": None, "decided_at": None, "created_at": "2026-11-16T09:00:00Z"}
             return httpx.Response(201, json=created)
+
+        if path == "/actions" and request.method == "POST":
+            # Like the real CRUD API: store it, and build the preview from the (fake) real data.
+            body = json.loads(request.content)
+            if body["target_id"] != ZARA["id"]:
+                return httpx.Response(404, json={"detail": "Employee not found"})
+            summary = (f"Change the salary of {ZARA['name']} from 50000.00 to {body['args']['amount']}, "
+                       f"starting {body['args']['effective_date']}.")
+            action_id = 500 + len(self.actions) + 1
+            self.actions[action_id] = {
+                "id": action_id, "action": body["action"], "target_id": body["target_id"], "args": body["args"],
+                "preview": {"summary": summary}, "status": "pending", "created_at": "2026-11-16T09:00:00Z",
+                "expires_at": "2026-11-16T09:05:00Z", "decided_at": None,
+            }
+            return httpx.Response(201, json=self.actions[action_id])
+
+        if path.startswith("/actions/") and path.endswith(("/confirm", "/cancel")):
+            action = self.actions.get(int(path.split("/")[2]))
+            if action is None:
+                return httpx.Response(404, json={"detail": "Pending action not found"})
+            if path.endswith("/confirm") and request.headers.get("X-Request-Source") == "agent":
+                return httpx.Response(403, json={"detail": "Only the user can confirm, in the app"})
+            if action["status"] != "pending":
+                return httpx.Response(400, json={"detail": f"This action is already {action['status']}"})
+            if path.endswith("/cancel"):
+                action["status"] = "cancelled"
+                return httpx.Response(200, json=action)
+            action["status"] = "done"
+            return httpx.Response(200, json={"action": action, "result": {"amount": action["args"]["amount"]}})
 
         if path.startswith("/leave/") and path.endswith("/cancel"):
             leave_id = int(path.split("/")[2])
