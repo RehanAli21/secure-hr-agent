@@ -3,6 +3,9 @@
 # The four roles:
 #   employee -> can see only their own profile
 #   manager  -> can see their own profile + their direct reports
+#
+# Being someone's manager is not about the role: whoever is set as their manager_id is their
+# manager, whatever their role. So "can I see my reports?" checks manager_id, never the role name.
 #   hr       -> can see and change all employees and departments
 #   admin    -> can see and change everything
 #
@@ -46,9 +49,9 @@ def can_see_employee(account: Account, employee: Employee) -> bool:
     if account.employee_id is not None and employee.id == account.employee_id:
         return True
 
-    # A manager can see the people who report directly to them.
+    # Anyone can see the people who report directly to them (whatever their role).
     # We check manager_id on the live record every time, so a change in the org chart works right away.
-    if account.role == "manager" and account.employee_id is not None and employee.manager_id == account.employee_id:
+    if account.employee_id is not None and employee.manager_id == account.employee_id:
         return True
 
     return False
@@ -65,13 +68,11 @@ def only_visible_employees(query: "Query[Employee]", account: Account) -> "Query
     if account.employee_id is None:
         return query.filter(false())  # not linked to an employee: they see nobody
 
-    if account.role == "manager":
-        return query.filter(or_(
-            Employee.id == account.employee_id,           # themselves
-            Employee.manager_id == account.employee_id,   # their direct reports
-        ))
-
-    return query.filter(Employee.id == account.employee_id)  # only themselves
+    # Everyone else: themselves + their direct reports (for most people that is nobody).
+    return query.filter(or_(
+        Employee.id == account.employee_id,           # themselves
+        Employee.manager_id == account.employee_id,   # their direct reports
+    ))
 
 
 # ---------- Contact details ----------

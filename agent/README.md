@@ -174,6 +174,20 @@ To start a new chat (the agent forgets the earlier messages, you stay logged in)
 curl -b cookies.txt -X POST http://localhost:8001/chat/new
 ```
 
+## Check the real model: the tool-choice eval
+
+The tests use a fake model, so they can't tell whether the real one picks the right tools. After
+changing the system prompt, a tool's docstring or the model, run (backend and Ollama running):
+
+```
+python eval_tool_choice.py            # Sara (employee), Leila (manager) and Grace (hr)
+python eval_tool_choice.py manager    # only one of them
+```
+
+It asks a fixed list of questions and checks the first tool the model picks (or that it answers
+without a tool, like for "What can I change?"). Today's score with `qwen3:4b-instruct`: 24/24.
+When you add a tool, add a few questions for it to `CASES`.
+
 ## Run the tests
 
 ```

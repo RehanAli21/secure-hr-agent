@@ -59,6 +59,16 @@ def permissions_text(my_permissions: dict[str, Any]) -> str:
     )
 
 
+def rules_message(my_permissions: dict[str, Any]) -> ChatMessage:
+    """The system message: the rules, today's date and the user's permissions."""
+    return ChatMessage(role=MessageRole.SYSTEM, content=(
+        SYSTEM_PROMPT
+        # The model doesn't know what day it is. It needs it for "my current salary" or "upcoming leave".
+        + f"\n\nToday's date: {date.today().isoformat()}"
+        + "\n\n" + permissions_text(my_permissions)
+    ))
+
+
 @dataclass
 class TurnResult:
     reply: str
@@ -98,12 +108,7 @@ def run_turn(session: ChatSession, user_message: str) -> TurnResult:
     tools = make_tools(session, my_permissions["permissions"])
 
     # The rules: rebuilt fresh every message, never stored in the chat memory.
-    rules = ChatMessage(role=MessageRole.SYSTEM, content=(
-        SYSTEM_PROMPT
-        # The model doesn't know what day it is. It needs it for "my current salary" or "upcoming leave".
-        + f"\n\nToday's date: {date.today().isoformat()}"
-        + "\n\n" + permissions_text(my_permissions)
-    ))
+    rules = rules_message(my_permissions)
     earlier = memory.past_messages(session)                       # the last few turns of this chat
     turn = [ChatMessage(role=MessageRole.USER, content=user_message)]  # this turn, growing as we go
     used_tools: list[str] = []

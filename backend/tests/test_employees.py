@@ -9,7 +9,7 @@
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-from tests.helpers import Org, create_superuser, log_in
+from tests.helpers import Org, create_employee, create_superuser, log_in
 
 
 def ids_in(response_json: list[dict[str, object]]) -> set[object]:
@@ -64,6 +64,19 @@ def test_a_manager_loses_access_as_soon_as_the_report_moves(client: TestClient, 
     db.commit()
 
     assert client.get(f"/employees/{org.report.id}", headers=headers).status_code == 404
+
+
+def test_anyone_with_reports_sees_them_whatever_their_role(client: TestClient, db: Session, org: Org) -> None:
+    # Omar's role is "employee", but Tina reports to him. Being her manager is what counts, not the role:
+    # it matches /me/permissions, which gives manager permissions to anyone with reports.
+    tina = create_employee(db, "Tina Trainee", manager=org.stranger)
+    headers = log_in(client, org.stranger.email)
+
+    response = client.get("/employees", headers=headers)
+
+    assert ids_in(response.json()) == {org.stranger.id, tina.id}
+    assert client.get(f"/employees/{tina.id}", headers=headers).status_code == 200
+    assert client.get(f"/employees/{org.report.id}", headers=headers).status_code == 404  # not his report
 
 
 def test_hr_sees_everyone(client: TestClient, org: Org) -> None:
