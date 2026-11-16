@@ -57,7 +57,11 @@ CASES = {
         ("What is Yusuf Brown's job title?", "search_employees"),
         ("When did Leila Ali start?", "search_employees"),
         ("Show employee 87", "get_employee"),
-        ("Give Leila Ali a salary of 170000 from 1 January 2027", "search_employees"),  # look her up first
+        # The big changes find the person themselves (a name or an id), and only propose:
+        ("Give Leila Ali a salary of 170000 from 1 January 2027", "update_employee_salary"),
+        ("Terminate Chloe Miller, her last day is 31 December 2026", "terminate_employee"),
+        ("Make Chloe Miller a manager", "change_employee_role"),  # a role, not a manager change
+        ("Chloe Miller now reports to Saad Chaudhry", "change_employee_manager"),
         ("What is my salary?", "get_my_salary"),
         ("What can I change?", None),
     ]),

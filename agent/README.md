@@ -76,15 +76,25 @@ possible: compact JSON, only the fields needed, and no old leave for managers.
 
 ### Big changes: the user must click Confirm
 
-HR can change a salary in the chat, but the agent only **proposes** it:
+HR can make four big changes in the chat, but the agent only **proposes** them: each tool sends a
+pending action (`POST /actions`), and **nothing changes yet**.
 
-| Tool | Used for | What it sends to the CRUD API |
+| Tool | Used for | Permission |
 | --- | --- | --- |
-| `update_employee_salary` | "Give Leila Ali 170000 from 1 January" (after looking her up) | a pending action (`POST /actions`): **nothing changes yet** |
+| `update_employee_salary` | "Give Leila Ali 170000 from 1 January" | `change_salary` |
+| `terminate_employee` | "Terminate Chloe Miller, her last day is 31 December" | `terminate_employee` |
+| `change_employee_role` | "Make Chloe Miller a manager" (a role) | `change_role` |
+| `change_employee_manager` | "Chloe Miller now reports to Saad Chaudhry", "...no longer has a manager" | `update_employee` |
+
+**Who:** these tools take a **name or an employee id**, and find the person themselves (the small
+model is bad at "search first, then pass on the id"). Exactly one match: the change is proposed.
+Nobody, or several people with that name (there are two Saad Chaudhrys!): nothing is proposed, and
+the agent gets the choices with their ids to ask "which one?"; the answer leads to a second call with
+the id.
 
 ```
 You:    Give Leila Ali 170000 from 1 January 2027
-Agent:  (search_employees, then update_employee_salary)
+Agent:  (update_employee_salary, which finds Leila Ali itself)
 Reply:  {"reply": "...", "pending_action": {"id": 2, "summary": "Change the salary of Leila Ali from
          163500.00 to 170000, starting 2027-01-01.", "expires_at": "..."}}
 Page:   shows the summary with Confirm and Cancel buttons

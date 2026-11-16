@@ -5,13 +5,15 @@
 
 import { FormEvent, useEffect, useRef, useState } from "react";
 
-import { ApiError, Me, sendMessage, startNewChat } from "./api";
+import ConfirmCard from "./ConfirmCard";
+import { ApiError, Me, PendingAction, sendMessage, startNewChat } from "./api";
 
 // One bubble on the screen.
 type Message = {
   from: "you" | "assistant" | "error";
   text: string;
   tools?: string[]; // the tools the agent used for this answer
+  action?: PendingAction; // a big change waiting for Confirm (shown as a card under the answer)
 };
 
 type Props = {
@@ -48,7 +50,12 @@ export default function ChatPage({ me, onLogOut, onSessionLost }: Props) {
     setWaiting(true);
     try {
       const answer = await sendMessage(text);
-      addMessage({ from: "assistant", text: answer.reply, tools: answer.tool_calls });
+      addMessage({
+        from: "assistant",
+        text: answer.reply,
+        tools: answer.tool_calls,
+        action: answer.pending_action ?? undefined,
+      });
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) {
         onSessionLost();
@@ -92,11 +99,14 @@ export default function ChatPage({ me, onLogOut, onSessionLost }: Props) {
         )}
 
         {messages.map((message, index) => (
-          <div key={index} className={"bubble " + message.from}>
-            {message.text}
-            {message.tools && message.tools.length > 0 && (
-              <div className="tools">Used: {message.tools.join(", ")}</div>
-            )}
+          <div key={index} className="message-group">
+            <div className={"bubble " + message.from}>
+              {message.text}
+              {message.tools && message.tools.length > 0 && (
+                <div className="tools">Used: {message.tools.join(", ")}</div>
+              )}
+            </div>
+            {message.action && <ConfirmCard action={message.action} onSessionLost={onSessionLost} />}
           </div>
         ))}
 

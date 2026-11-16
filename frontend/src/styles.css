@@ -169,6 +169,13 @@ input {
   color: var(--error);
 }
 
+/* A message, plus its Confirm card if it has one. */
+.message-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
 .tools {
   margin-top: 6px;
   font-size: 12px;
@@ -180,4 +187,42 @@ input {
   gap: 8px;
   padding: 12px 16px;
   border-top: 1px solid var(--border);
+}
+
+.small {
+  font-size: 13px;
+}
+
+/* ---------- Confirm card (a big change waiting for the user) ---------- */
+
+.confirm-card {
+  align-self: flex-start;
+  max-width: 80%;
+  padding: 12px 14px;
+  border: 2px solid var(--accent);
+  border-radius: 12px;
+  background: var(--surface);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* Once it is decided, the card goes quiet. */
+.confirm-card.done,
+.confirm-card.cancelled,
+.confirm-card.failed {
+  border-color: var(--border);
+}
+
+.confirm-title {
+  font-weight: 600;
+}
+
+.confirm-buttons {
+  display: flex;
+  gap: 8px;
+}
+
+.confirm-result {
+  font-weight: 600;
 }

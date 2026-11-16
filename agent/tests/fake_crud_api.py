@@ -156,8 +156,16 @@ class FakeCrudApi:
             body = json.loads(request.content)
             if body["target_id"] != ZARA["id"]:
                 return httpx.Response(404, json={"detail": "Employee not found"})
-            summary = (f"Change the salary of {ZARA['name']} from 50000.00 to {body['args']['amount']}, "
-                       f"starting {body['args']['effective_date']}.")
+            args = body["args"]
+            summaries = {
+                "change_salary": f"Change the salary of {ZARA['name']} from 50000.00 to {args.get('amount')}, "
+                                 f"starting {args.get('effective_date')}.",
+                "terminate_employee": f"Terminate {ZARA['name']} (Accountant). Last working day: "
+                                      f"{args.get('termination_date')}. Their login will be disabled.",
+                "change_role": f"Change the role of {ZARA['name']} from employee to {args.get('role')}.",
+                "change_manager": f"Change the manager of {ZARA['name']} to employee {args.get('manager_id')}.",
+            }
+            summary = summaries[body["action"]]
             action_id = 500 + len(self.actions) + 1
             self.actions[action_id] = {
                 "id": action_id, "action": body["action"], "target_id": body["target_id"], "args": body["args"],

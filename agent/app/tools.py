@@ -62,13 +62,16 @@ TOOL_PERMISSIONS = {
     "reject_leave_request": "decide_reports_leave",
     # hr and admin, big changes: they only PROPOSE, the user confirms in the app
     "update_employee_salary": "change_salary",
+    "terminate_employee": "terminate_employee",
+    "change_employee_role": "change_role",
+    "change_employee_manager": "update_employee",
 }
 
 # The tools that CHANGE something. Every other tool only reads.
 # The agent allows at most one change per message (see app/agent.py), and later the tools that
 # need the user's confirmation will be marked here too. The model never decides any of this.
 WRITE_TOOLS = {"submit_leave_request", "cancel_leave_request", "approve_leave_request", "reject_leave_request",
-               "update_employee_salary"}
+               "update_employee_salary", "terminate_employee", "change_employee_role", "change_employee_manager"}
 
 
 def keep_only(record: dict[str, Any], fields: list[str]) -> dict[str, Any]:
@@ -175,13 +178,41 @@ class WhichTeamLeave(BaseModel):
     start_date: Optional[date] = None
 
 
+# The big changes say WHO with one text: a name ("Sam Lee") or an employee id ("87").
+# The tool finds the person itself: small models are bad at chaining "search, then use the id".
+WHO = Field(min_length=1, max_length=100)
+
+
 class NewSalary(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    employee_id: int = Field(gt=0)  # from search_employees: the preview shows the name before anyone confirms
+    employee: str = WHO
     # Decimal (not float) keeps money exact. The same limits as the CRUD API.
     amount: Decimal = Field(gt=0, max_digits=12, decimal_places=2)
     effective_date: date  # the day the new salary starts (it can be in the future)
+
+
+class Termination(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    employee: str = WHO
+    termination_date: date  # their last working day (it can be in the past, today or in the future)
+
+
+class NewRole(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    employee: str = WHO
+    role: Literal["employee", "manager", "hr", "admin"]  # a real list of choices, like the CRUD API
+
+
+class NewManager(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    employee: str = WHO
+    # The new manager: a name, an id, or "nobody". Required on purpose: if the model forgets it,
+    # the call is refused, instead of quietly proposing "no manager".
+    new_manager: str = WHO
 
 
 # ---------- The tools ----------
@@ -299,17 +330,21 @@ def make_tools(session: ChatSession, permissions: list[str]) -> list[FunctionToo
             # so for one match we give the full profile straight away.
             return as_json({"one_match": full_profile(people[0])})
 
-        departments = department_names()
-        matches: list[dict[str, Any]] = []
-        for person in people[:SEARCH_LIMIT]:
-            match = keep_only(person, SEARCH_FIELDS)
-            match["department"] = departments.get(match.pop("department_id"), "unknown")
-            matches.append(match)
-        result: dict[str, Any] = {"several_matches": matches}
+        result: dict[str, Any] = {"several_matches": short_list(people[:SEARCH_LIMIT])}
         if len(people) > SEARCH_LIMIT:
             # A sentence, not a true/false flag: small models read sentences better.
             result["note"] = f"Showing {SEARCH_LIMIT} of more than {SEARCH_LIMIT} matches. Ask the user for the full name."
         return as_json(result)
+
+    def short_list(people: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Just enough to tell people apart (name, job title, department, id), to ask "which one?"."""
+        departments = department_names()
+        matches: list[dict[str, Any]] = []
+        for person in people:
+            match = keep_only(person, SEARCH_FIELDS)
+            match["department"] = departments.get(match.pop("department_id"), "unknown")
+            matches.append(match)
+        return matches
 
     def full_profile(employee: dict[str, Any]) -> dict[str, Any]:
         """An employee's allowed fields, with the department and manager as names instead of ids."""
@@ -449,6 +484,31 @@ def make_tools(session: ChatSession, permissions: list[str]) -> list[FunctionToo
     # button. Only that button (a person clicking) runs the change. The CRUD API refuses to run it
     # for the agent, so even a tricked model can't skip this step.
 
+    def find_one_employee(who: str, argument: str) -> tuple[Optional[dict[str, Any]], str]:
+        """Find exactly ONE employee from a name or an id. Never guesses.
+        argument = the tool argument `who` came from ("employee" or "new_manager"), for the message.
+        Returns (the employee, "") or (None, a message for the model, e.g. the choices to ask about)."""
+        if who.strip().isdigit():
+            try:
+                return crud_api.call(session, "GET", f"/employees/{who.strip()}"), ""
+            except crud_api.CrudApiError as error:
+                if error.status_code == 404:
+                    return None, f"Nothing was proposed: nobody has the employee id {who}."
+                raise
+        people = crud_api.call(session, "GET", "/employees", params={"name": who, "limit": SEARCH_LIMIT + 1})
+        if len(people) == 1:
+            return people[0], ""
+        if len(people) == 0:
+            return None, f'Nothing was proposed: nobody is called "{who}".'
+        # Say exactly which argument gets the id, with a real example: the model repeated the
+        # name (and got the same list again) when the note only said "use the id".
+        return None, as_json({
+            "note": f'Nothing was proposed: several people are called "{who}". Ask the user which one. '
+                    f'When they answer, call this tool again with {argument} set to that person\'s id '
+                    f'from this list, for example {argument}="{people[0]["id"]}".',
+            "several_matches": short_list(people[:SEARCH_LIMIT]),
+        })
+
     def propose(action: str, target_id: int, args: dict[str, Any]) -> str:
         """Store a pending action, and keep it on the session so the page can show the Confirm button."""
         pending = crud_api.call(session, "POST", "/actions",
@@ -456,19 +516,64 @@ def make_tools(session: ChatSession, permissions: list[str]) -> list[FunctionToo
         session.proposed_action = {"id": pending["id"], "summary": pending["preview"]["summary"],
                                    "expires_at": pending["expires_at"]}
         return as_json({
-            "waiting_for_confirmation": pending["preview"]["summary"],
-            "note": "Nothing has changed yet. The user must check this and click Confirm in the app, "
-                    "within 5 minutes. Typing yes in the chat does not confirm.",
+            # Status first: the model wrote "Terminated Sam Lee" (as if done) when the result began
+            # with the summary itself.
+            "status": "PROPOSED, NOT DONE YET",
+            "proposed_change": pending["preview"]["summary"],
+            # Written so the model can repeat it to the user word for word (small models often do).
+            "note": "Nothing has changed yet. Please check the details on the card below and click "
+                    "Confirm within 5 minutes. Typing yes in the chat does not confirm it.",
         })
 
-    def update_employee_salary(employee_id: int, amount: Decimal, effective_date: date) -> str:
+    def update_employee_salary(employee: str, amount: Decimal, effective_date: date) -> str:
         """Propose a new salary for an employee: the amount (a number, no currency) and the day it
         starts (YYYY-MM-DD). This does NOT change the salary: the user must confirm it in the app.
         Only use it when the user asks to change someone's salary ("give Sam Lee 90000 from
-        1 January"). The employee_id must come from search_employees. Never guess an id.
+        1 January"). employee: their name as the user wrote it, or their employee id.
         If the amount or the start date is missing, ask the user."""
-        return propose("change_salary", employee_id,
+        person, problem = find_one_employee(employee, "employee")
+        if person is None:
+            return problem
+        return propose("change_salary", person["id"],
                        {"amount": str(amount), "effective_date": effective_date.isoformat()})
+
+    def terminate_employee(employee: str, termination_date: date) -> str:
+        """Propose to terminate an employee, with their last working day (YYYY-MM-DD). Their login
+        is disabled. This does NOT terminate them yet: the user must confirm it in the app.
+        Only use it when the user asks to terminate someone ("terminate Sam Lee, last day
+        31 December"). employee: their name as the user wrote it, or their employee id.
+        If the last working day is missing, ask the user."""
+        person, problem = find_one_employee(employee, "employee")
+        if person is None:
+            return problem
+        return propose("terminate_employee", person["id"], {"termination_date": termination_date.isoformat()})
+
+    def change_employee_role(employee: str, role: str) -> str:
+        """Propose a new role for an employee: employee, manager, hr or admin. The role decides what
+        they may see and do in this system. Use it for "make Sam Lee a manager" or "give Sam Lee
+        the hr role". This does NOT change it yet: the user must confirm it in the app.
+        employee: their name as the user wrote it, or their employee id."""
+        person, problem = find_one_employee(employee, "employee")
+        if person is None:
+            return problem
+        return propose("change_role", person["id"], {"role": role})
+
+    def change_employee_manager(employee: str, new_manager: str) -> str:
+        """Propose a new manager for an employee: who they report to. Use it for "Sam Lee now reports
+        to Kim Park", or "Sam Lee no longer has a manager" (new_manager "nobody").
+        Not for "make Sam Lee a manager": that is a role (change_employee_role).
+        employee and new_manager: a name as the user wrote it, or an employee id.
+        new_manager can be "nobody" (no manager). This does NOT change it yet: the user must
+        confirm it in the app."""
+        person, problem = find_one_employee(employee, "employee")
+        if person is None:
+            return problem
+        if new_manager.strip().lower() == "nobody":
+            return propose("change_manager", person["id"], {"manager_id": None})
+        manager, problem = find_one_employee(new_manager, "new_manager")
+        if manager is None:
+            return problem
+        return propose("change_manager", person["id"], {"manager_id": manager["id"]})
 
     all_tools = [
         FunctionTool.from_defaults(fn=get_my_profile, fn_schema=NoArgs),
@@ -484,6 +589,9 @@ def make_tools(session: ChatSession, permissions: list[str]) -> list[FunctionToo
         FunctionTool.from_defaults(fn=approve_leave_request, fn_schema=WhichTeamLeave),
         FunctionTool.from_defaults(fn=reject_leave_request, fn_schema=WhichTeamLeave),
         FunctionTool.from_defaults(fn=update_employee_salary, fn_schema=NewSalary),
+        FunctionTool.from_defaults(fn=terminate_employee, fn_schema=Termination),
+        FunctionTool.from_defaults(fn=change_employee_role, fn_schema=NewRole),
+        FunctionTool.from_defaults(fn=change_employee_manager, fn_schema=NewManager),
     ]
 
     # Only offer the tools this user may use, so the AI doesn't offer things that would fail.
