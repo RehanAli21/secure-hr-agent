@@ -14,7 +14,7 @@ It has login, logout, "who am I?" and a chat with eight read-only tools. Four ar
 | Tool | Answers questions like | What reaches the AI |
 | --- | --- | --- |
 | `get_my_profile` | "What is my job title?" | profile, **without** home address |
-| `get_my_leave` | "How many sick days did I take?" | type, dates, days, status, **without** the reason |
+| `get_my_leave` | "How many sick days did I take?" | days of approved leave per year and type (added up by the code, not the model), and the 20 newest requests: type, dates, days, status, **without** the reason |
 | `get_my_salary` | "What is my current salary?" | amount and effective date |
 | `get_my_reviews` | "What did my last review say?" | period, rating, comments, reviewer id |
 

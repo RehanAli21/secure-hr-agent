@@ -3,11 +3,12 @@
 
 import json
 from datetime import date
+from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
 
-from app.tools import TOOL_PERMISSIONS
+from app.tools import TOOL_PERMISSIONS, approved_days_per_year
 from tests.fake_crud_api import EMAIL, EMPLOYEE_PERMISSIONS, HR_PERMISSIONS, PASSWORD, FakeCrudApi
 from tests.fake_llm import FakeLLM, text_reply, tool_call_reply
 
@@ -56,6 +57,43 @@ def test_leave_days_are_counted_for_the_ai(client: TestClient, fake_llm: FakeLLM
     result = run_tool(client, fake_llm, "get_my_leave")
 
     assert '"calendar_days":2' in result
+
+
+def test_leave_days_are_added_up_per_year_for_the_ai(
+    client: TestClient, fake_api: FakeCrudApi, fake_llm: FakeLLM
+) -> None:
+    # The model added up sick days wrongly, so the tool sends the totals, worked out by the code.
+    log_in(client)
+
+    result = run_tool(client, fake_llm, "get_my_leave")
+
+    assert '"approved_days_per_year":{"2026":{"sick":2}}' in result
+    # Totals need ALL the leave, so the tool asks for the most the CRUD API gives.
+    leave_request = [r for r in fake_api.requests if r.url.path == "/leave"][-1]
+    assert leave_request.url.params["limit"] == "100"
+
+
+def leave(leave_type: str, start: str, end: str, status: str = "approved") -> dict[str, Any]:
+    return {"leave_type": leave_type, "start_date": start, "end_date": end, "status": status}
+
+
+def test_only_approved_leave_is_added_up() -> None:
+    totals = approved_days_per_year([
+        leave("sick", "2026-05-20", "2026-05-21"),
+        leave("sick", "2026-06-01", "2026-06-01"),
+        leave("sick", "2026-07-01", "2026-07-05", status="rejected"),
+        leave("sick", "2026-08-01", "2026-08-05", status="pending"),
+        leave("annual", "2026-03-05", "2026-03-14"),
+        leave("sick", "2025-12-09", "2025-12-10"),
+    ])
+
+    assert totals == {"2026": {"sick": 3, "annual": 10}, "2025": {"sick": 2}}
+
+
+def test_leave_over_new_year_counts_in_both_years() -> None:
+    totals = approved_days_per_year([leave("annual", "2025-12-30", "2026-01-02")])
+
+    assert totals == {"2025": {"annual": 2}, "2026": {"annual": 2}}
 
 
 # ---------- Salary ----------

@@ -14,7 +14,7 @@
 # isn't HR got the AI to call them, the CRUD API would refuse (404), exactly as for the app.
 
 import json
-from datetime import date
+from datetime import date, timedelta
 from typing import Any, Optional
 
 from llama_index.core.tools import FunctionTool
@@ -81,6 +81,26 @@ def leave_rows(leave: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return rows
 
 
+def approved_days_per_year(leave: list[dict[str, Any]]) -> dict[str, dict[str, int]]:
+    """Add up the days of APPROVED leave, per year and per type: {"2026": {"annual": 15, "sick": 2}}.
+
+    Small models get these sums wrong (they mix up years, or add badly), so the code does them.
+    We walk through every day of the leave, so leave from 30 December to 2 January counts
+    2 days in each year.
+    """
+    totals: dict[str, dict[str, int]] = {}
+    for request in leave:
+        if request["status"] != "approved":
+            continue  # pending, rejected or cancelled leave was not taken
+        day = date.fromisoformat(request["start_date"])
+        last_day = date.fromisoformat(request["end_date"])
+        while day <= last_day:
+            year = totals.setdefault(str(day.year), {})
+            year[request["leave_type"]] = year.get(request["leave_type"], 0) + 1
+            day += timedelta(days=1)
+    return totals
+
+
 # ---------- Argument schemas (the AI's arguments are checked against these before a tool runs) ----------
 
 class NoArgs(BaseModel):
@@ -121,16 +141,24 @@ def make_tools(session: ChatSession, permissions: list[str]) -> list[FunctionToo
         return as_json(keep_only(employee, PROFILE_FIELDS))
 
     def get_my_leave() -> str:
-        """Get the logged-in user's own leave requests (newest first, at most 20): type (annual, sick,
-        unpaid or parental), start and end dates, number of calendar days, and status
-        (pending, approved, rejected or cancelled).
+        """Get the logged-in user's own leave.
+        "approved_days_per_year" is the number of days of approved leave, per year and per type
+        (annual, sick, unpaid or parental), already added up: for "how many days" questions, read
+        the number from there. Do not add up the requests yourself.
+        "requests" are the newest leave requests (at most 20): type, start and end dates, number
+        of calendar days, and status (pending, approved, rejected or cancelled).
         Use it for ANY question about the user's own leave, past or future: "when was my last
         holiday?", "how many sick days did I take?", "was my leave approved?"."""
         employee_id = my_employee_id()
         if employee_id is None:
             return "This account is not linked to an employee."
-        leave = crud_api.call(session, "GET", "/leave", params={"employee_id": employee_id})
-        return as_json(leave_rows(leave))
+        # Ask for up to 100 requests (the most the CRUD API gives), so the totals are complete,
+        # but show the model only the 20 newest ones: the model can only read a little text.
+        leave = crud_api.call(session, "GET", "/leave", params={"employee_id": employee_id, "limit": 100})
+        return as_json({
+            "approved_days_per_year": approved_days_per_year(leave),
+            "requests": leave_rows(leave[:20]),
+        })
 
     def get_my_salary() -> str:
         """Get the logged-in user's own salary history (newest first): amount and effective date.
