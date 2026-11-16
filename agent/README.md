@@ -49,7 +49,8 @@ possible: compact JSON, only the fields needed, and no old leave for managers.
 ```
 POST /chat "What is my job title?"
   0. The agent asks the CRUD API what this user may do (GET /me/permissions), fresh every time
-  1. The model gets: the rules + the user's permissions + the message + only the tools they may use
+  1. The model gets: the rules + the user's permissions + the last few turns of the chat
+     + the message + only the tools they may use
   2. The model asks: "call get_my_profile"
   3. The agent checks the tool name and its arguments, then runs it:
        get_my_profile -> CRUD API /me and /employees/{id}, with the user's own token
@@ -65,6 +66,27 @@ POST /chat "What is my job title?"
   message. The model uses them to answer "what can I change?", and each tool is only offered to users
   with the permission it needs (`TOOL_PERMISSIONS` in `app/tools.py`). That filter is only for a better
   experience: the CRUD API still checks every call.
+
+## Chat memory
+
+The agent remembers the last few turns of the chat (`app/memory.py`), so follow-up questions work:
+
+```
+You:   What is Yusuf Brown's job title?
+Agent: There are two: a Data Engineer in Engineering and a Recruiter in HR. Which one do you mean?
+You:   The one in Engineering.
+Agent: He is a Data Engineer.
+You:   Who is his manager?
+Agent: Leila Ali.
+```
+
+- One turn = your message, the tool calls with their results, and the answer. The tool results are
+  kept on purpose: they hold the ids the agent needs for "the one in Engineering".
+- At most 3 turns, and at most `OLLAMA_CONTEXT` characters (about a quarter of the context window).
+  The oldest turns are forgotten first.
+- The rules and your permissions are **not** remembered: they are rebuilt fresh for every message.
+- The memory lives in your session on the server: `POST /chat/new` or logging out forgets it.
+  A message that fails (for example, Ollama is down) is not remembered.
 
 ## How login works
 
@@ -146,7 +168,11 @@ curl -b cookies.txt -X POST http://localhost:8001/auth/logout
 ```
 
 The chat answer also lists the tools it used: `{"reply": "...", "tool_calls": ["get_my_profile"]}`.
-Each message is answered on its own for now: the agent doesn't remember earlier messages yet.
+To start a new chat (the agent forgets the earlier messages, you stay logged in):
+
+```
+curl -b cookies.txt -X POST http://localhost:8001/chat/new
+```
 
 ## Run the tests
 

@@ -14,9 +14,14 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from fastapi import Cookie, HTTPException
+from llama_index.core.base.llms.types import ChatMessage
 
 # The name of the cookie that holds the session id.
 SESSION_COOKIE = "session_id"
+
+
+def empty_history() -> list[list[ChatMessage]]:
+    return []
 
 
 @dataclass
@@ -25,9 +30,12 @@ class ChatSession:
     # print(session) shows "ChatSession()" instead of the secret tokens.
     access_token: str = field(repr=False)
     refresh_token: str = field(repr=False)
+    # The chat so far (see app/memory.py): a list of turns, each turn a list of messages.
+    # Also repr=False: it holds HR data from the tool results.
+    history: list[list[ChatMessage]] = field(default_factory=empty_history, repr=False)
 
 
-# session id -> that user's tokens
+# session id -> that user's tokens and chat
 SESSIONS: dict[str, ChatSession] = {}
 
 

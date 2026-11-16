@@ -1,9 +1,11 @@
 # The agent loop: how one chat message becomes an answer.
 #
-#   1. Send the user's message + the list of tools to the model.
+#   1. Send the rules + the last few turns of this chat (app/memory.py) + the user's message
+#      + the list of tools to the model.
 #   2. The model either answers with text (done!) or asks to call a tool.
 #   3. We check the tool name and arguments, run the tool, and give the result back to the model.
 #   4. Go back to 1, but at most MAX_TOOL_CALLS times, so a confused model can't loop forever.
+#   5. Remember the finished turn, for the next message.
 
 from dataclasses import dataclass
 from datetime import date
@@ -13,7 +15,7 @@ from llama_index.core.base.llms.types import ChatMessage, MessageRole, ToolCallB
 from llama_index.core.tools import FunctionTool
 from pydantic import ValidationError
 
-from app import crud_api, llm
+from app import crud_api, llm, memory
 from app.sessions import ChatSession
 from app.tools import make_tools
 
@@ -95,33 +97,37 @@ def run_turn(session: ChatSession, user_message: str) -> TurnResult:
     my_permissions = crud_api.call(session, "GET", "/me/permissions")
     tools = make_tools(session, my_permissions["permissions"])
 
-    messages = [
-        ChatMessage(role=MessageRole.SYSTEM, content=(
-            SYSTEM_PROMPT
-            # The model doesn't know what day it is. It needs it for "my current salary" or "upcoming leave".
-            + f"\n\nToday's date: {date.today().isoformat()}"
-            + "\n\n" + permissions_text(my_permissions)
-        )),
-        ChatMessage(role=MessageRole.USER, content=user_message),
-    ]
+    # The rules: rebuilt fresh every message, never stored in the chat memory.
+    rules = ChatMessage(role=MessageRole.SYSTEM, content=(
+        SYSTEM_PROMPT
+        # The model doesn't know what day it is. It needs it for "my current salary" or "upcoming leave".
+        + f"\n\nToday's date: {date.today().isoformat()}"
+        + "\n\n" + permissions_text(my_permissions)
+    ))
+    earlier = memory.past_messages(session)                       # the last few turns of this chat
+    turn = [ChatMessage(role=MessageRole.USER, content=user_message)]  # this turn, growing as we go
     used_tools: list[str] = []
 
     while True:
-        answer = llm.ask_llm(messages, tools)
+        answer = llm.ask_llm([rules, *earlier, *turn], tools)
         tool_calls = [block for block in answer.blocks if isinstance(block, ToolCallBlock)]
 
         # No tool call: this is the final answer for the user.
         if not tool_calls:
+            turn.append(answer)
+            memory.remember(session, turn)
             return TurnResult(reply=answer.content or "", tool_calls=used_tools)
 
         # Loop limit: stop a confused model that keeps calling tools.
         if len(used_tools) + len(tool_calls) > MAX_TOOL_CALLS:
-            return TurnResult(reply="Sorry, that took too many steps. Please ask in a simpler way.",
-                              tool_calls=used_tools)
+            reply = "Sorry, that took too many steps. Please ask in a simpler way."
+            turn.append(ChatMessage(role=MessageRole.ASSISTANT, content=reply))
+            memory.remember(session, turn)
+            return TurnResult(reply=reply, tool_calls=used_tools)
 
         # Remember that the model asked for these tools, then add each tool's result.
-        messages.append(answer)
+        turn.append(answer)
         for call in tool_calls:
             used_tools.append(call.tool_name)
             tool_result = wrap_as_data(run_tool(tools, call))
-            messages.append(ChatMessage(role=MessageRole.TOOL, content=tool_result))
+            turn.append(ChatMessage(role=MessageRole.TOOL, content=tool_result))

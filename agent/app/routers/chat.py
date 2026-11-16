@@ -1,8 +1,10 @@
-# The chat endpoint: the chat UI sends one message, and gets the assistant's answer back.
+# The chat endpoints: the chat UI sends one message, and gets the assistant's answer back.
+# The agent remembers the last few messages of the chat (app/memory.py), until "new chat" or logout.
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, ConfigDict, Field
 
+from app import memory
 from app.agent import run_turn
 from app.sessions import ChatSession, current_session
 
@@ -25,3 +27,10 @@ def chat(data: ChatRequest, session: ChatSession = Depends(current_session)):
     """Send one message. You must be logged in: the agent works as YOU, with your permissions."""
     result = run_turn(session, data.message)
     return ChatReply(reply=result.reply, tool_calls=result.tool_calls)
+
+
+@router.post("/chat/new")
+def new_chat(session: ChatSession = Depends(current_session)):
+    """Start a new chat: the agent forgets the earlier messages (you stay logged in)."""
+    memory.forget(session)
+    return {"message": "Started a new chat"}
