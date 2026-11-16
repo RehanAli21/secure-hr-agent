@@ -21,6 +21,10 @@ LEAVE = [
     {"id": 11, "employee_id": 7, "leave_type": "sick", "start_date": "2026-05-20", "end_date": "2026-05-21",
      "reason": "Private medical reason", "status": "approved", "approver_id": 2,
      "decided_at": "2026-05-19T10:00:00Z", "created_at": "2026-05-19T09:00:00Z"},
+    # Pending, so it can still be cancelled.
+    {"id": 12, "employee_id": 7, "leave_type": "annual", "start_date": "2099-01-05", "end_date": "2099-01-09",
+     "reason": None, "status": "pending", "approver_id": None, "decided_at": None,
+     "created_at": "2026-11-01T09:00:00Z"},
 ]
 SALARIES = [
     {"id": 21, "employee_id": 7, "amount": "66100.00", "effective_date": "2026-03-01", "created_at": "2026-02-01T09:00:00Z"},
@@ -55,6 +59,13 @@ TEAM_LEAVE = [
     {"id": 40, "employee_id": 8, "leave_type": "sick", "start_date": "2020-03-02", "end_date": "2020-03-03",
      "reason": None, "status": "approved", "approver_id": 7, "decided_at": "2020-03-02T09:00:00Z",
      "created_at": "2020-03-02T08:00:00Z"},
+    # More pending leave, waiting for the manager: Tom has two requests, Tara one.
+    {"id": 42, "employee_id": 8, "leave_type": "annual", "start_date": "2099-08-03", "end_date": "2099-08-05",
+     "reason": None, "status": "pending", "approver_id": None, "decided_at": None,
+     "created_at": "2026-11-02T09:00:00Z"},
+    {"id": 43, "employee_id": 9, "leave_type": "unpaid", "start_date": "2099-09-01", "end_date": "2099-09-02",
+     "reason": None, "status": "pending", "approver_id": None, "decided_at": None,
+     "created_at": "2026-11-03T09:00:00Z"},
 ]
 
 # For the HR tools: departments, and people to search by name.
@@ -72,12 +83,14 @@ HR_PERMISSIONS: dict[str, Any] = {
 }
 EMPLOYEE_PERMISSIONS: dict[str, Any] = {
     "kind": "user", "role": "employee", "is_manager": False,
-    "permissions": ["view_own_profile", "view_own_leave", "view_own_salary", "view_own_reviews", "submit_leave"],
+    "permissions": ["view_own_profile", "view_own_leave", "view_own_salary", "view_own_reviews", "submit_leave",
+                    "cancel_own_leave"],
     "descriptions": {"view_own_profile": "See your own employee profile",
                      "view_own_leave": "See your own leave requests",
                      "view_own_salary": "See your own salary and its history",
                      "view_own_reviews": "See your own performance reviews",
-                     "submit_leave": "Ask for leave (annual, sick, unpaid or parental)"},
+                     "submit_leave": "Ask for leave (annual, sick, unpaid or parental)",
+                     "cancel_own_leave": "Cancel your own leave: while it is pending, or approved but not started yet"},
 }
 NO_PERMISSIONS: dict[str, Any] = {"kind": "user", "role": "employee", "is_manager": False, "permissions": [], "descriptions": {}}
 
@@ -128,11 +141,37 @@ class FakeCrudApi:
                 return httpx.Response(self.employee_status, json={"detail": "Not allowed"})
             return httpx.Response(200, json=EMPLOYEE)
 
+        if path == "/leave" and request.method == "POST":
+            # Like the real CRUD API: the new request is for the logged-in user (from the token).
+            body = json.loads(request.content)
+            if body["start_date"] == "2099-02-01":
+                return httpx.Response(409, json={"detail": "You already have leave on some of these days"})
+            created = {"id": 99, "employee_id": 7, **body, "reason": None, "status": "pending",
+                       "approver_id": None, "decided_at": None, "created_at": "2026-11-16T09:00:00Z"}
+            return httpx.Response(201, json=created)
+
+        if path.startswith("/leave/") and path.endswith("/cancel"):
+            leave_id = int(path.split("/")[2])
+            for row in LEAVE:
+                if row["id"] == leave_id:
+                    return httpx.Response(200, json={**row, "status": "cancelled"})
+            return httpx.Response(404, json={"detail": "Leave request not found"})
+
         if path == "/leave" and request.url.params.get("employee_id") == "7":
             return httpx.Response(200, json=LEAVE)
 
         if path == "/leave" and request.url.params.get("manager_id") == "7":
-            return httpx.Response(200, json=TEAM_LEAVE)
+            status = request.url.params.get("status")
+            return httpx.Response(200, json=[row for row in TEAM_LEAVE if status is None or row["status"] == status])
+
+        if path.startswith("/leave/") and path.endswith(("/approve", "/reject")):
+            # Like the real CRUD API, the result has the new status.
+            leave_id = int(path.split("/")[2])
+            new_status = "approved" if path.endswith("/approve") else "rejected"
+            for row in TEAM_LEAVE:
+                if row["id"] == leave_id:
+                    return httpx.Response(200, json={**row, "status": new_status, "approver_id": 7})
+            return httpx.Response(404, json={"detail": "Leave request not found"})
 
         if path == "/employees" and request.url.params.get("manager_id") == "7":
             return httpx.Response(200, json=TEAM)

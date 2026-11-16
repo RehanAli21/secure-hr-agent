@@ -326,4 +326,4 @@ def test_the_model_is_told_todays_date(client: TestClient, fake_llm: FakeLLM) ->
     log_in(client)
     assert client.post("/chat", json={"message": "Hi"}).status_code == 200
 
-    assert f"Today's date: {date.today().isoformat()}" in fake_llm.system_prompt()
+    assert f"Today's date: {date.today().isoformat()} ({date.today().strftime('%A')})" in fake_llm.system_prompt()

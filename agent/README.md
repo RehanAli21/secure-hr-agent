@@ -9,7 +9,7 @@ Chat UI (React)  -->  agent service (this folder)  -->  CRUD API (../backend)  -
 **The AI proposes, the API decides.** This service has no database password. It reaches HR data only
 through the CRUD API, using the logged-in user's token, so it can never do more than that user.
 
-It has login, logout, "who am I?" and a chat with eight read-only tools. Four are about the logged-in user:
+It has login, logout, "who am I?" and a chat with eight read-only tools and one that asks for leave. Four are about the logged-in user:
 
 | Tool | Answers questions like | What reaches the AI |
 | --- | --- | --- |
@@ -36,6 +36,36 @@ Two are for HR and admins (permission `view_all_employees`):
 
 **Ask, never guess:** when a name matches several people (there are two Yusuf Browns!), the agent
 lists them and asks which one. It never picks one itself.
+
+Four change something. For everyone (permissions `submit_leave` and `cancel_own_leave`):
+
+| Tool | Used for | What it sends to the CRUD API |
+| --- | --- | --- |
+| `submit_leave_request` | "I want annual leave from 5 to 9 January", "Book me a sick day tomorrow" | leave type and dates only: no reason (it can be private), no employee id |
+| `cancel_leave_request` | "Cancel my leave from 5 January", "Cancel my leave" | the cancel of the one request that starts on that day, found by the tool itself |
+
+New leave is pending until the manager approves it. If the type or a date is missing, the agent asks.
+Leave is cancelled **by its start date, never by an id**: the user says "my leave from 5 January",
+and pending or approved leave never overlaps, so only one request can start on that day. Without a
+date (or with a wrong one) the tool cancels nothing and returns only the leave that *can* still be
+cancelled, so the agent can ask "which one?".
+
+And for managers (permission `decide_reports_leave`):
+
+| Tool | Used for | What it sends to the CRUD API |
+| --- | --- | --- |
+| `approve_leave_request` | "Approve Chloe's leave" | the approval of the one pending request that fits |
+| `reject_leave_request` | "Reject Adam's leave request" | the rejection of the one pending request that fits |
+
+The same idea: the model says **whose** leave (part of the name is fine) and/or the first day, never
+an id. The tool looks only at the pending requests of the manager's direct reports, and acts only
+when exactly one fits. Two requests from the same person, a name that matches nobody, or no details
+at all: nothing is decided, and the agent gets the list of requests waiting, to ask which one.
+The CRUD API still checks that the user is the direct manager and that the request is still pending.
+**At most one change per message:** the tools that change something are listed in `WRITE_TOOLS`
+(`app/tools.py`), and the agent refuses a second one in the same message, so a confused or tricked
+model can't make many changes at once. Every change lands in the CRUD API's audit log, marked
+`source = agent`.
 
 **About the small local model:** the context window (how much text the model reads at once) is
 `OLLAMA_CONTEXT` in `.env`, 4096 tokens by default (about 3,000 words). It wins over the "context

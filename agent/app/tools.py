@@ -15,7 +15,7 @@
 
 import json
 from datetime import date, timedelta
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
 from llama_index.core.tools import FunctionTool
 from pydantic import BaseModel, ConfigDict, Field
@@ -54,7 +54,17 @@ TOOL_PERMISSIONS = {
     # hr and admin
     "search_employees": "view_all_employees",
     "get_employee": "view_all_employees",
+    # changes
+    "submit_leave_request": "submit_leave",
+    "cancel_leave_request": "cancel_own_leave",
+    "approve_leave_request": "decide_reports_leave",
+    "reject_leave_request": "decide_reports_leave",
 }
+
+# The tools that CHANGE something. Every other tool only reads.
+# The agent allows at most one change per message (see app/agent.py), and later the tools that
+# need the user's confirmation will be marked here too. The model never decides any of this.
+WRITE_TOOLS = {"submit_leave_request", "cancel_leave_request", "approve_leave_request", "reject_leave_request"}
 
 
 def keep_only(record: dict[str, Any], fields: list[str]) -> dict[str, Any]:
@@ -101,6 +111,14 @@ def approved_days_per_year(leave: list[dict[str, Any]]) -> dict[str, dict[str, i
     return totals
 
 
+def can_be_cancelled(request: dict[str, Any]) -> bool:
+    """The CRUD API's rule: pending leave, or approved leave that has not started yet.
+    We only use it to find the right request. The CRUD API still checks it when we cancel."""
+    if request["status"] == "pending":
+        return True
+    return request["status"] == "approved" and date.fromisoformat(request["start_date"]) > date.today()
+
+
 # ---------- Argument schemas (the AI's arguments are checked against these before a tool runs) ----------
 
 class NoArgs(BaseModel):
@@ -119,6 +137,38 @@ class EmployeeId(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     employee_id: int = Field(gt=0)  # a real id is always a positive number
+
+
+class NewLeaveRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    # A real list of choices: the model can't invent a leave type.
+    leave_type: Literal["annual", "sick", "unpaid", "parental"]
+    # Pydantic turns "2027-01-05" into a real date, and refuses anything that isn't a date.
+    start_date: date
+    end_date: date
+    # Notice: no reason. It can be private (e.g. medical), so it stays out of the chat.
+    # And no employee id: you can only ask leave for yourself, the CRUD API takes you from the token.
+
+
+class LeaveStartDate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    # Which leave to cancel: the one that starts on this day. Not an id: the user says
+    # "cancel my leave from 5 January", and the CRUD API never lets two pending or approved
+    # leave requests overlap, so at most one of them starts on any day.
+    # Left out (None): the tool only lists the leave that can be cancelled, and cancels nothing.
+    start_date: Optional[date] = None
+
+
+class WhichTeamLeave(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    # Which team member's leave to approve or reject: (part of) their name, and/or the first day.
+    # Not an id, for the same reason as LeaveStartDate. Both left out: the tool only lists the
+    # requests that are waiting, and decides nothing.
+    employee_name: Optional[str] = Field(default=None, min_length=2, max_length=100)
+    start_date: Optional[date] = None
 
 
 # ---------- The tools ----------
@@ -264,6 +314,121 @@ def make_tools(session: ChatSession, permissions: list[str]) -> list[FunctionToo
         The employee_id must come from search_employees or another tool result. Never guess an id."""
         return as_json(full_profile(crud_api.call(session, "GET", f"/employees/{employee_id}")))
 
+    # ---------- Changes ----------
+
+    def submit_leave_request(leave_type: str, start_date: date, end_date: date) -> str:
+        """Ask for leave for the logged-in user: annual, sick, unpaid or parental leave, from
+        start_date to end_date (both days included).
+        Only use it when the user asks to take leave ("I want annual leave from 5 to 9 January",
+        "book me a sick day tomorrow"). If the type or a date is missing, ask the user first.
+        Work out the dates yourself from today's date ("tomorrow", "next Friday"), and send them
+        as YYYY-MM-DD. Never ask the user to write a date in a special format.
+        Never use it to answer a question about leave."""
+        new_request = {"leave_type": leave_type, "start_date": start_date.isoformat(),
+                       "end_date": end_date.isoformat()}
+        created = crud_api.call(session, "POST", "/leave", json=new_request)
+        return as_json({
+            "submitted": leave_rows([created])[0],
+            "note": "The leave request was sent. It is pending until the manager approves it.",
+        })
+
+    def cancel_leave_request(start_date: Optional[date] = None) -> str:
+        """Cancel the logged-in user's own leave that starts on start_date (YYYY-MM-DD).
+        Leave can be cancelled while it is pending, or when it is approved but has not started yet.
+        Only use it when the user asks to cancel leave ("cancel my leave from 5 January").
+        If the user doesn't say the exact start date ("cancel my February leave", "cancel my
+        leave"), call it WITHOUT start_date: it cancels nothing, and lists the leave that can be
+        cancelled. If exactly one of them fits what the user said, call it again with that
+        start_date. Otherwise list them and ask which one. Never ask the user for a date format.
+        Never use it to answer a question about leave."""
+        employee_id = my_employee_id()
+        if employee_id is None:
+            return "This account is not linked to an employee."
+        leave = crud_api.call(session, "GET", "/leave", params={"employee_id": employee_id, "limit": 100})
+        cancellable = [request for request in leave if can_be_cancelled(request)]
+        if not cancellable:
+            return "The user has no leave that can be cancelled."
+
+        # No date: only show the choices (just the leave that CAN be cancelled, not the whole history).
+        if start_date is None:
+            return as_json({
+                "note": "Nothing was cancelled yet. Which one does the user mean?",
+                "leave_that_can_be_cancelled": leave_rows(cancellable),
+            })
+
+        matches = [request for request in cancellable if request["start_date"] == start_date.isoformat()]
+        if not matches:
+            # Don't guess: give the model the choices, so it can ask the user which one they mean.
+            return as_json({
+                "note": f"Nothing was cancelled: no leave that can be cancelled starts on "
+                        f"{start_date.isoformat()}. Ask the user which of these they mean.",
+                "leave_that_can_be_cancelled": leave_rows(cancellable),
+            })
+
+        cancelled = crud_api.call(session, "POST", f"/leave/{matches[0]['id']}/cancel")
+        return as_json({"cancelled": leave_rows([cancelled])[0], "note": "The leave was cancelled."})
+
+    def waiting_team_leave() -> list[dict[str, Any]]:
+        """The pending leave requests of my direct reports, with the employee's name added.
+        Each row keeps its "id", so we can approve or reject it (the model never has to)."""
+        employee_id = my_employee_id()
+        if employee_id is None:
+            return []
+        names = {person["id"]: person["name"] for person in team_of(employee_id)}
+        leave = crud_api.call(session, "GET", "/leave",
+                              params={"manager_id": employee_id, "status": "pending", "limit": 100})
+        rows = leave_rows(leave)
+        for row, request in zip(rows, leave):
+            row["employee_name"] = names.get(request["employee_id"], "unknown")
+        return rows
+
+    def decide_team_leave(decision: str, employee_name: Optional[str], start_date: Optional[date]) -> str:
+        """Shared by approve_leave_request and reject_leave_request. decision is "approve" or "reject"."""
+        waiting = waiting_team_leave()
+        if not waiting:
+            return "No leave requests are waiting for the user to approve or reject."
+
+        # Keep the requests that fit what the model gave: part of the name, and/or the first day.
+        matches = waiting
+        if employee_name is not None:
+            matches = [row for row in matches if employee_name.lower() in row["employee_name"].lower()]
+        if start_date is not None:
+            matches = [row for row in matches if row["start_date"] == start_date.isoformat()]
+
+        # Only act when the model said which one, and exactly one request fits. Otherwise: never
+        # guess. Give the model the choices, so it can ask the user which one they mean.
+        if (employee_name is None and start_date is None) or len(matches) != 1:
+            return as_json({
+                "note": f"Nothing was done yet. Which leave request does the user want to {decision}?",
+                "waiting_for_a_decision": matches if matches else waiting,
+            })
+
+        chosen = matches[0]
+        decided = crud_api.call(session, "POST", f"/leave/{chosen['id']}/{decision}")
+        row = leave_rows([decided])[0]
+        row["employee_name"] = chosen["employee_name"]
+        return as_json({"decided": row, "note": f"The leave request was {row['status']}."})
+
+    def approve_leave_request(employee_name: Optional[str] = None, start_date: Optional[date] = None) -> str:
+        """Approve a pending leave request of someone who reports to the logged-in user.
+        Say whose leave it is with employee_name (part of the name is fine, e.g. "Adam") and/or
+        start_date (the first day of the leave, YYYY-MM-DD).
+        Only use it when the user asks to approve leave ("approve Adam's leave").
+        If the user doesn't say which request, call it with no arguments: it approves nothing, and
+        lists the requests that are waiting, so you can ask which one.
+        Never use it to answer a question about leave."""
+        return decide_team_leave("approve", employee_name, start_date)
+
+    def reject_leave_request(employee_name: Optional[str] = None, start_date: Optional[date] = None) -> str:
+        """Reject a pending leave request of someone who reports to the logged-in user.
+        Say whose leave it is with employee_name (part of the name is fine, e.g. "Adam") and/or
+        start_date (the first day of the leave, YYYY-MM-DD).
+        Only use it when the user asks to reject leave ("reject Chloe's leave request").
+        If the user doesn't say which request, call it with no arguments: it rejects nothing, and
+        lists the requests that are waiting, so you can ask which one.
+        Never use it to answer a question about leave."""
+        return decide_team_leave("reject", employee_name, start_date)
+
     all_tools = [
         FunctionTool.from_defaults(fn=get_my_profile, fn_schema=NoArgs),
         FunctionTool.from_defaults(fn=get_my_leave, fn_schema=NoArgs),
@@ -273,6 +438,10 @@ def make_tools(session: ChatSession, permissions: list[str]) -> list[FunctionToo
         FunctionTool.from_defaults(fn=get_team_leave, fn_schema=NoArgs),
         FunctionTool.from_defaults(fn=search_employees, fn_schema=NameSearch),
         FunctionTool.from_defaults(fn=get_employee, fn_schema=EmployeeId),
+        FunctionTool.from_defaults(fn=submit_leave_request, fn_schema=NewLeaveRequest),
+        FunctionTool.from_defaults(fn=cancel_leave_request, fn_schema=LeaveStartDate),
+        FunctionTool.from_defaults(fn=approve_leave_request, fn_schema=WhichTeamLeave),
+        FunctionTool.from_defaults(fn=reject_leave_request, fn_schema=WhichTeamLeave),
     ]
 
     # Only offer the tools this user may use, so the AI doesn't offer things that would fail.

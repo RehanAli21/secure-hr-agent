@@ -3,6 +3,7 @@
 # The tests (tests/) use a fake model, so they can't tell us whether the real model is any good.
 # This script asks the real model (Ollama) a fixed list of questions, as three demo users, and
 # checks only the FIRST thing it does: which tool does it call, or does it answer without a tool?
+# It never runs the tools, so it changes nothing (not even for "I want annual leave...").
 #
 # Use it after changing the system prompt, a tool's docstring or the model, and compare the score.
 #
@@ -32,6 +33,10 @@ CASES = {
         ("What did my last review say?", "get_my_reviews"),
         ("What can I change?", None),
         ("Who is in my team?", None),  # she has no team: no team tool is offered to her
+        ("I want annual leave from 5 to 9 January 2027", "submit_leave_request"),
+        ("I want some time off", None),  # the type and dates are missing: it must ask
+        ("Cancel my leave from 5 January 2027", "cancel_leave_request"),
+        ("Cancel my leave", "cancel_leave_request"),  # without a date: lists the choices
     ]),
     "manager": ("leila.ali@gatekeeper.local", [
         ("What is my job title?", "get_my_profile"),
@@ -44,6 +49,8 @@ CASES = {
         ("What did my last review say?", "get_my_reviews"),
         ("What can I change?", None),
         ("What is Chloe's salary?", None),  # managers may not see their reports' salaries
+        ("Approve Chloe's leave", "approve_leave_request"),
+        ("Reject Adam's leave request", "reject_leave_request"),
     ]),
     "hr": ("grace.raza@gatekeeper.local", [
         ("Who is Leila Ali's manager?", "search_employees"),
