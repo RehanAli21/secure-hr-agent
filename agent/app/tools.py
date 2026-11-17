@@ -13,10 +13,11 @@
 # The HR tools DO take a name or an id, but they still run as the logged-in user: if someone who
 # isn't HR got the AI to call them, the CRUD API would refuse (404), exactly as for the app.
 
+import inspect
 import json
 from datetime import date, timedelta
 from decimal import Decimal
-from typing import Any, Literal, Optional
+from typing import Any, Callable, Literal, Optional
 
 from llama_index.core.tools import FunctionTool
 from pydantic import BaseModel, ConfigDict, Field
@@ -217,6 +218,17 @@ class NewManager(BaseModel):
 
 # ---------- The tools ----------
 
+def make_tool(fn: Callable[..., str], fn_schema: type[BaseModel]) -> FunctionTool:
+    """Turn one of the functions below into a tool for the AI. Its docstring is what the AI reads.
+
+    We give the description ourselves, because LlamaIndex would otherwise start it with the Python
+    signature ("get_my_profile() -> str"), and keep the 8 spaces in front of every docstring line.
+    The AI doesn't need either, and every tool description is sent with EVERY message: HR has 16
+    tools, and the model can only read 4096 tokens at once (see app/llm.py).
+    """
+    return FunctionTool.from_defaults(fn=fn, fn_schema=fn_schema, description=inspect.cleandoc(fn.__doc__ or ""))
+
+
 def make_tools(session: ChatSession, permissions: list[str]) -> list[FunctionTool]:
     """Build the tools for one logged-in user: only the ones their permissions allow."""
 
@@ -225,9 +237,9 @@ def make_tools(session: ChatSession, permissions: list[str]) -> list[FunctionToo
         return crud_api.call(session, "GET", "/me").get("employee_id")
 
     def get_my_profile() -> str:
-        """Get the logged-in user's own employee profile: name, email, job title,
-        department id, manager id, employment status, start date and phone.
-        Use it for any question about the user's own job, department, manager or start date."""
+        """The user's own profile: name, email, job title, department id, manager id, employment
+        status, start date and phone.
+        Use it for ANY question about the user's own job, department, manager or start date."""
         employee_id = my_employee_id()
         if employee_id is None:
             return "This account is not linked to an employee."
@@ -235,14 +247,11 @@ def make_tools(session: ChatSession, permissions: list[str]) -> list[FunctionToo
         return as_json(keep_only(employee, PROFILE_FIELDS))
 
     def get_my_leave() -> str:
-        """Get the logged-in user's own leave.
-        "approved_days_per_year" is the number of days of approved leave, per year and per type
-        (annual, sick, unpaid or parental), already added up: for "how many days" questions, read
-        the number from there. Do not add up the requests yourself.
-        "requests" are the newest leave requests (at most 20): type, start and end dates, number
-        of calendar days, and status (pending, approved, rejected or cancelled).
-        Use it for ANY question about the user's own leave, past or future: "when was my last
-        holiday?", "how many sick days did I take?", "was my leave approved?"."""
+        """The user's own leave. "approved_days_per_year": the days of approved leave per year and
+        type, already added up. Read "how many days" answers from there; never add up requests yourself.
+        "requests": the 20 newest requests (type, dates, calendar_days, status).
+        Use it for ANY question about the user's own leave: "when was my last holiday?", "how many sick
+        days did I take?", "was my leave approved?"."""
         employee_id = my_employee_id()
         if employee_id is None:
             return "This account is not linked to an employee."
@@ -255,10 +264,9 @@ def make_tools(session: ChatSession, permissions: list[str]) -> list[FunctionToo
         })
 
     def get_my_salary() -> str:
-        """Get the logged-in user's own salary history (newest first): amount and effective date.
-        The current salary is the newest one whose effective date is not after today.
-        A row with a later effective date is a raise that has not started yet.
-        The amounts have no currency: say the number only, never add a currency sign."""
+        """The user's own salary history, newest first. The current salary is the newest one whose
+        effective_date is not after today; a later one is a raise that has not started yet.
+        The amounts have no currency: never add a currency sign."""
         employee_id = my_employee_id()
         if employee_id is None:
             return "This account is not linked to an employee."
@@ -266,8 +274,8 @@ def make_tools(session: ChatSession, permissions: list[str]) -> list[FunctionToo
         return keep_only_in_list(salaries, SALARY_FIELDS)
 
     def get_my_reviews() -> str:
-        """Get the logged-in user's own performance reviews (newest first): period (like "2025-H2"),
-        rating from 1 to 5, comments, and the employee id of the reviewer."""
+        """The user's own performance reviews, newest first: period (like "2025-H2"), rating
+        from 1 to 5, comments, and the reviewer's employee id."""
         employee_id = my_employee_id()
         if employee_id is None:
             return "This account is not linked to an employee."
@@ -280,8 +288,8 @@ def make_tools(session: ChatSession, permissions: list[str]) -> list[FunctionToo
         return [person for person in people if person["employment_status"] == "active"]
 
     def get_my_team() -> str:
-        """Get the people who currently report directly to the logged-in user (their team): name,
-        email, job title, department id, start date and phone.
+        """The people who report directly to the user (their team): name, email, job title,
+        department id, start date and phone.
         Use it for ANY question about the user's team: "who is in my team?", "what is Ali's job title?"."""
         employee_id = my_employee_id()
         if employee_id is None:
@@ -289,9 +297,8 @@ def make_tools(session: ChatSession, permissions: list[str]) -> list[FunctionToo
         return keep_only_in_list(team_of(employee_id), TEAM_FIELDS)
 
     def get_team_leave() -> str:
-        """Get the CURRENT and UPCOMING leave of the people who report directly to the logged-in
-        user (leave that ends today or later): employee name, type, start and end dates, number of
-        calendar days, and status. "pending" means it is waiting for the user to approve or reject it.
+        """Current and upcoming leave of the user's team: employee name, type, dates,
+        calendar_days and status ("pending" = waiting for the user to approve or reject it).
         Use it for ANY question about the team's leave: "who is off next week?", "who is off in
         December?", "are there leave requests waiting for me?"."""
         employee_id = my_employee_id()
@@ -317,8 +324,8 @@ def make_tools(session: ChatSession, permissions: list[str]) -> list[FunctionToo
     def search_employees(name: str) -> str:
         """Find employees by (part of) their name, e.g. "yusuf" or "Yusuf Brown".
         Use it FIRST whenever the user names a person.
-        One match: you get their full profile (job title, department, manager, start date, phone...).
-        Several matches: you get a short list. Show it and ask the user which one they mean."""
+        One match: you get their full profile (job title, department, manager, start date...).
+        Several matches: a short list. Show it and ask the user which one they mean."""
         # We ask for one more than we show, so we know if there are more.
         people = crud_api.call(session, "GET", "/employees", params={"name": name, "limit": SEARCH_LIMIT + 1})
 
@@ -357,21 +364,18 @@ def make_tools(session: ChatSession, permissions: list[str]) -> list[FunctionToo
         return profile
 
     def get_employee(employee_id: int) -> str:
-        """Get one employee's full profile by their employee id: name, email, job title, department,
-        manager (with name), employment status, start and termination date, and phone.
-        The employee_id must come from search_employees or another tool result. Never guess an id."""
+        """One employee's full profile, by their employee id.
+        The id must come from a tool result. Never guess an id."""
         return as_json(full_profile(crud_api.call(session, "GET", f"/employees/{employee_id}")))
 
     # ---------- Changes ----------
 
     def submit_leave_request(leave_type: str, start_date: date, end_date: date) -> str:
-        """Ask for leave for the logged-in user: annual, sick, unpaid or parental leave, from
-        start_date to end_date (both days included).
-        Only use it when the user asks to take leave ("I want annual leave from 5 to 9 January",
-        "book me a sick day tomorrow"). If the type or a date is missing, ask the user first.
-        Work out the dates yourself from today's date ("tomorrow", "next Friday"), and send them
-        as YYYY-MM-DD. Never ask the user to write a date in a special format.
-        Never use it to answer a question about leave."""
+        """Ask for leave for the user (annual, sick, unpaid or parental), from start_date
+        to end_date, both days included. Only when the user asks to take leave ("book me a sick day
+        tomorrow"). If the type or a date is missing, ask the user.
+        Work out the dates yourself from today's date ("next Friday") and send them as YYYY-MM-DD.
+        Never ask the user for a date format. Never use it to answer a question."""
         new_request = {"leave_type": leave_type, "start_date": start_date.isoformat(),
                        "end_date": end_date.isoformat()}
         created = crud_api.call(session, "POST", "/leave", json=new_request)
@@ -381,14 +385,14 @@ def make_tools(session: ChatSession, permissions: list[str]) -> list[FunctionToo
         })
 
     def cancel_leave_request(start_date: Optional[date] = None) -> str:
-        """Cancel the logged-in user's own leave that starts on start_date (YYYY-MM-DD).
-        Leave can be cancelled while it is pending, or when it is approved but has not started yet.
-        Only use it when the user asks to cancel leave ("cancel my leave from 5 January").
-        If the user doesn't say the exact start date ("cancel my February leave", "cancel my
-        leave"), call it WITHOUT start_date: it cancels nothing, and lists the leave that can be
-        cancelled. If exactly one of them fits what the user said, call it again with that
-        start_date. Otherwise list them and ask which one. Never ask the user for a date format.
-        Never use it to answer a question about leave."""
+        """Cancel the user's own leave that starts on start_date (YYYY-MM-DD). start_date is optional.
+        Only when the user asks to cancel leave.
+        If the user doesn't say the exact start date ("cancel my leave", "cancel my February leave"),
+        call it WITHOUT start_date: it cancels nothing and lists the leave that can be cancelled.
+        If exactly one fits what the user said, call it again with that start_date; otherwise ask
+        which one. Never ask the user for a date."""
+        # "start_date is optional" must be written here: the model can't see it anywhere else
+        # (Ollama drops the "or null" part of the schema). Without it, it asked the user for a date.
         employee_id = my_employee_id()
         if employee_id is None:
             return "This account is not linked to an employee."
@@ -458,23 +462,19 @@ def make_tools(session: ChatSession, permissions: list[str]) -> list[FunctionToo
         return as_json({"decided": row, "note": f"The leave request was {row['status']}."})
 
     def approve_leave_request(employee_name: Optional[str] = None, start_date: Optional[date] = None) -> str:
-        """Approve a pending leave request of someone who reports to the logged-in user.
-        Say whose leave it is with employee_name (part of the name is fine, e.g. "Adam") and/or
-        start_date (the first day of the leave, YYYY-MM-DD).
-        Only use it when the user asks to approve leave ("approve Adam's leave").
-        If the user doesn't say which request, call it with no arguments: it approves nothing, and
-        lists the requests that are waiting, so you can ask which one.
-        Never use it to answer a question about leave."""
+        """Approve a pending leave request of the user's team, chosen by employee_name (part of the
+        name is fine) and/or start_date (the first day, YYYY-MM-DD). Both are optional.
+        Only when the user asks to approve leave ("approve Adam's leave").
+        If the user doesn't say whose leave ("approve leave", "approve the waiting request"), call it
+        with NO arguments: it approves nothing and lists the waiting requests, so you can ask which one."""
         return decide_team_leave("approve", employee_name, start_date)
 
     def reject_leave_request(employee_name: Optional[str] = None, start_date: Optional[date] = None) -> str:
-        """Reject a pending leave request of someone who reports to the logged-in user.
-        Say whose leave it is with employee_name (part of the name is fine, e.g. "Adam") and/or
-        start_date (the first day of the leave, YYYY-MM-DD).
-        Only use it when the user asks to reject leave ("reject Chloe's leave request").
-        If the user doesn't say which request, call it with no arguments: it rejects nothing, and
-        lists the requests that are waiting, so you can ask which one.
-        Never use it to answer a question about leave."""
+        """Reject a pending leave request of the user's team, chosen by employee_name (part of the
+        name is fine) and/or start_date (the first day, YYYY-MM-DD). Both are optional.
+        Only when the user asks to reject leave ("reject Chloe's leave").
+        If the user doesn't say whose leave ("reject leave", "reject the waiting request"), call it
+        with NO arguments: it rejects nothing and lists the waiting requests, so you can ask which one."""
         return decide_team_leave("reject", employee_name, start_date)
 
     # ---------- Big changes: the user must confirm them ----------
@@ -526,11 +526,10 @@ def make_tools(session: ChatSession, permissions: list[str]) -> list[FunctionToo
         })
 
     def update_employee_salary(employee: str, amount: Decimal, effective_date: date) -> str:
-        """Propose a new salary for an employee: the amount (a number, no currency) and the day it
-        starts (YYYY-MM-DD). This does NOT change the salary: the user must confirm it in the app.
-        Only use it when the user asks to change someone's salary ("give Sam Lee 90000 from
-        1 January"). employee: their name as the user wrote it, or their employee id.
-        If the amount or the start date is missing, ask the user."""
+        """Propose a new salary: the amount (a number, no currency) from effective_date
+        (YYYY-MM-DD). Only when the user asks ("give Sam Lee 90000 from 1 January").
+        employee: a name as the user wrote it, or an employee id. If the amount or date is missing, ask.
+        It only proposes: the user confirms it in the app."""
         person, problem = find_one_employee(employee, "employee")
         if person is None:
             return problem
@@ -538,33 +537,31 @@ def make_tools(session: ChatSession, permissions: list[str]) -> list[FunctionToo
                        {"amount": str(amount), "effective_date": effective_date.isoformat()})
 
     def terminate_employee(employee: str, termination_date: date) -> str:
-        """Propose to terminate an employee, with their last working day (YYYY-MM-DD). Their login
-        is disabled. This does NOT terminate them yet: the user must confirm it in the app.
-        Only use it when the user asks to terminate someone ("terminate Sam Lee, last day
-        31 December"). employee: their name as the user wrote it, or their employee id.
-        If the last working day is missing, ask the user."""
+        """Propose to terminate an employee. termination_date is their last working day
+        (YYYY-MM-DD). Only when the user asks ("terminate Sam Lee, last day 31 December").
+        employee: a name as the user wrote it, or an employee id. If the date is missing, ask.
+        It only proposes: the user confirms it in the app."""
         person, problem = find_one_employee(employee, "employee")
         if person is None:
             return problem
         return propose("terminate_employee", person["id"], {"termination_date": termination_date.isoformat()})
 
     def change_employee_role(employee: str, role: str) -> str:
-        """Propose a new role for an employee: employee, manager, hr or admin. The role decides what
-        they may see and do in this system. Use it for "make Sam Lee a manager" or "give Sam Lee
-        the hr role". This does NOT change it yet: the user must confirm it in the app.
-        employee: their name as the user wrote it, or their employee id."""
+        """Propose a new role: employee, manager, hr or admin (what they may see and do in
+        this system). Use it for "make Sam Lee a manager" or "give Sam Lee the hr role".
+        employee: a name as the user wrote it, or an employee id.
+        It only proposes: the user confirms it in the app."""
         person, problem = find_one_employee(employee, "employee")
         if person is None:
             return problem
         return propose("change_role", person["id"], {"role": role})
 
     def change_employee_manager(employee: str, new_manager: str) -> str:
-        """Propose a new manager for an employee: who they report to. Use it for "Sam Lee now reports
-        to Kim Park", or "Sam Lee no longer has a manager" (new_manager "nobody").
+        """Propose who an employee reports to: "Sam Lee now reports to Kim Park", or
+        "Sam Lee no longer has a manager" (new_manager "nobody").
         Not for "make Sam Lee a manager": that is a role (change_employee_role).
         employee and new_manager: a name as the user wrote it, or an employee id.
-        new_manager can be "nobody" (no manager). This does NOT change it yet: the user must
-        confirm it in the app."""
+        It only proposes: the user confirms it in the app."""
         person, problem = find_one_employee(employee, "employee")
         if person is None:
             return problem
@@ -576,22 +573,22 @@ def make_tools(session: ChatSession, permissions: list[str]) -> list[FunctionToo
         return propose("change_manager", person["id"], {"manager_id": manager["id"]})
 
     all_tools = [
-        FunctionTool.from_defaults(fn=get_my_profile, fn_schema=NoArgs),
-        FunctionTool.from_defaults(fn=get_my_leave, fn_schema=NoArgs),
-        FunctionTool.from_defaults(fn=get_my_salary, fn_schema=NoArgs),
-        FunctionTool.from_defaults(fn=get_my_reviews, fn_schema=NoArgs),
-        FunctionTool.from_defaults(fn=get_my_team, fn_schema=NoArgs),
-        FunctionTool.from_defaults(fn=get_team_leave, fn_schema=NoArgs),
-        FunctionTool.from_defaults(fn=search_employees, fn_schema=NameSearch),
-        FunctionTool.from_defaults(fn=get_employee, fn_schema=EmployeeId),
-        FunctionTool.from_defaults(fn=submit_leave_request, fn_schema=NewLeaveRequest),
-        FunctionTool.from_defaults(fn=cancel_leave_request, fn_schema=LeaveStartDate),
-        FunctionTool.from_defaults(fn=approve_leave_request, fn_schema=WhichTeamLeave),
-        FunctionTool.from_defaults(fn=reject_leave_request, fn_schema=WhichTeamLeave),
-        FunctionTool.from_defaults(fn=update_employee_salary, fn_schema=NewSalary),
-        FunctionTool.from_defaults(fn=terminate_employee, fn_schema=Termination),
-        FunctionTool.from_defaults(fn=change_employee_role, fn_schema=NewRole),
-        FunctionTool.from_defaults(fn=change_employee_manager, fn_schema=NewManager),
+        make_tool(get_my_profile, NoArgs),
+        make_tool(get_my_leave, NoArgs),
+        make_tool(get_my_salary, NoArgs),
+        make_tool(get_my_reviews, NoArgs),
+        make_tool(get_my_team, NoArgs),
+        make_tool(get_team_leave, NoArgs),
+        make_tool(search_employees, NameSearch),
+        make_tool(get_employee, EmployeeId),
+        make_tool(submit_leave_request, NewLeaveRequest),
+        make_tool(cancel_leave_request, LeaveStartDate),
+        make_tool(approve_leave_request, WhichTeamLeave),
+        make_tool(reject_leave_request, WhichTeamLeave),
+        make_tool(update_employee_salary, NewSalary),
+        make_tool(terminate_employee, Termination),
+        make_tool(change_employee_role, NewRole),
+        make_tool(change_employee_manager, NewManager),
     ]
 
     # Only offer the tools this user may use, so the AI doesn't offer things that would fail.

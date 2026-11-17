@@ -249,8 +249,16 @@ python eval_tool_choice.py manager    # only one of them
 ```
 
 It asks a fixed list of questions and checks the first tool the model picks (or that it answers
-without a tool, like for "What can I change?"). Today's score with `qwen3:4b-instruct`: 24/24.
+without a tool, like for "What can I change?"). Today's score with `qwen3:4b-instruct`: 37/37.
 When you add a tool, add a few questions for it to `CASES`.
+
+It also checks the **prompt budget**: the rules and every tool description are sent with every
+message, before the user has typed anything. The model reads at most 4096 tokens at once, so for
+each user they must stay under `PROMPT_BUDGET` (3000 tokens), leaving room for chat memory and
+tool results. Today: Sara 1469, Leila 2042, Grace (hr, 16 tools) 2948. That is why the tool
+docstrings are short, and why `make_tool` sends only the docstring, without the Python signature.
+One catch: Ollama doesn't show the model which arguments are optional, so a docstring must say
+it ("start_date is optional"), or the model asks the user for a date instead of calling the tool.
 
 ## Run the tests
 

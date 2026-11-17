@@ -327,3 +327,18 @@ def test_the_model_is_told_todays_date(client: TestClient, fake_llm: FakeLLM) ->
     assert client.post("/chat", json={"message": "Hi"}).status_code == 200
 
     assert f"Today's date: {date.today().isoformat()} ({date.today().strftime('%A')})" in fake_llm.system_prompt()
+
+
+def test_tool_descriptions_are_only_the_docstring(client: TestClient, fake_api: FakeCrudApi, fake_llm: FakeLLM) -> None:
+    # Every description is sent with every message, so it must be short: no Python signature
+    # ("get_my_profile() -> str") and no indentation in front of each line (see make_tool).
+    log_in(client)
+    fake_api.permissions = {**EMPLOYEE_PERMISSIONS, "permissions": list(set(TOOL_PERMISSIONS.values()))}
+
+    assert client.post("/chat", json={"message": "Hi"}).status_code == 200
+
+    assert len(fake_llm.seen_tools) == len(TOOL_PERMISSIONS)
+    for tool in fake_llm.seen_tools:
+        description = tool.metadata.description
+        assert not description.startswith(tool.metadata.get_name()), description
+        assert "\n " not in description, description
