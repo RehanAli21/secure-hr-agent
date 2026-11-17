@@ -22,6 +22,8 @@ from app.tools import WRITE_TOOLS, make_tools
 MAX_TOOL_CALLS = 8
 # At most one change per message, so a confused (or tricked) model can't make lots of changes at once.
 MAX_CHANGES_PER_MESSAGE = 1
+# Said instead of an answer in which the model made up a tool result (see run_turn).
+MADE_UP_RESULT_REPLY = "Sorry, something went wrong while looking that up. Please ask again."
 
 SYSTEM_PROMPT = """You are the assistant of Gatekeeper HR. You help employees with their HR records.
 
@@ -130,6 +132,11 @@ def run_turn(session: ChatSession, user_message: str) -> TurnResult:
 
         # No tool call: this is the final answer for the user.
         if not tool_calls:
+            if "<tool_result>" in (answer.content or ""):
+                # The model WROTE a tool result itself instead of calling the tool (seen live:
+                # "<tool_result>... no termination procedure ...</tool_result>"). That is made-up
+                # data, so the user never sees it.
+                answer = ChatMessage(role=MessageRole.ASSISTANT, content=MADE_UP_RESULT_REPLY)
             turn.append(answer)
             memory.remember(session, turn)
             return TurnResult(reply=answer.content or "", tool_calls=used_tools,

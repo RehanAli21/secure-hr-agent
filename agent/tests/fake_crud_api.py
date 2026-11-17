@@ -92,6 +92,17 @@ EMPLOYEE_PERMISSIONS: dict[str, Any] = {
                      "submit_leave": "Ask for leave (annual, sick, unpaid or parental)",
                      "cancel_own_leave": "Cancel your own leave: while it is pending, or approved but not started yet"},
 }
+# What GET /roles answers: like the real one, but shorter.
+ROLES = [
+    {"name": "employee", "description": "Sees their own records. Submits and cancels their own leave.",
+     "permissions": ["view_own_profile", "submit_leave"],
+     "descriptions": {"view_own_profile": "See your own employee profile",
+                      "submit_leave": "Ask for leave (annual, sick, unpaid or parental)"}},
+    {"name": "hr", "description": "Sees all employees, including salaries. Terminates employees.",
+     "permissions": ["view_all_employees", "terminate_employee"],
+     "descriptions": {"view_all_employees": "See every employee",
+                      "terminate_employee": "Terminate employees (this also disables their login)"}},
+]
 NO_PERMISSIONS: dict[str, Any] = {"kind": "user", "role": "employee", "is_manager": False, "permissions": [], "descriptions": {}}
 
 
@@ -229,6 +240,9 @@ class FakeCrudApi:
 
         if path == "/departments":
             return httpx.Response(200, json=DEPARTMENTS)
+
+        if path == "/roles":
+            return httpx.Response(200, json=ROLES)
 
         if path == "/employees/7/salaries":
             return httpx.Response(200, json=SALARIES)

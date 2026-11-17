@@ -22,7 +22,7 @@ from typing import Any, Callable, Literal, Optional
 from llama_index.core.tools import FunctionTool
 from pydantic import BaseModel, ConfigDict, Field
 
-from app import crud_api
+from app import crud_api, policies
 from app.sessions import ChatSession
 
 # Field allowlists: ONLY these fields reach the AI. Everything else is dropped.
@@ -56,6 +56,10 @@ TOOL_PERMISSIONS = {
     # hr and admin
     "search_employees": "view_all_employees",
     "get_employee": "view_all_employees",
+    # everyone: every role has view_own_profile. The tool itself only searches the policies
+    # that the user's role may read (see app/policies.py).
+    "search_policies": "view_own_profile",
+    "get_roles": "view_own_profile",  # everyone: GET /roles is open to every logged-in user
     # changes
     "submit_leave_request": "submit_leave",
     "cancel_leave_request": "cancel_own_leave",
@@ -145,6 +149,20 @@ class EmployeeId(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     employee_id: int = Field(gt=0)  # a real id is always a positive number
+
+
+class PolicyQuestion(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    question: str = Field(min_length=2, max_length=200)
+
+
+class WhichRole(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    # Left out (None): a one-line summary of every role. Given: that role's permissions.
+    # One role at a time, because all four with all their permissions is a lot of text.
+    role: Optional[Literal["employee", "manager", "hr", "admin"]] = None
 
 
 class NewLeaveRequest(BaseModel):
@@ -368,6 +386,36 @@ def make_tools(session: ChatSession, permissions: list[str]) -> list[FunctionToo
         The id must come from a tool result. Never guess an id."""
         return as_json(full_profile(crud_api.call(session, "GET", f"/employees/{employee_id}")))
 
+    def search_policies(question: str) -> str:
+        """Search the company's HR policies (leave allowances, sick leave and doctor's notes, working
+        hours, working from home, procedures). Use it for ANY question about a rule: "how many days
+        of annual leave do I get?", "do I need a doctor's note?". Not for the user's own records."""
+        # The role comes live from the CRUD API, never from the model, so nobody can ask for
+        # "the hr policies" by pretending to be HR.
+        role = crud_api.call(session, "GET", "/me/permissions")["role"]
+        found = policies.find_policies(question, role)
+        if not found:
+            # Say what there is, so the model can try other words or tell the user.
+            return as_json({
+                "note": "No policy matches that question. These are the policies the user can read:",
+                "policy_titles": [chunk.title for chunk in policies.readable_by(role)],
+            })
+        return as_json({
+            "policies": [{"title": chunk.title, "text": chunk.text} for chunk in found],
+            # The policies explain the rules. What THIS user may do is in <permissions>.
+            "note": "Policy text explains the rules. It does not say what this user may do: that is in <permissions>.",
+        })
+
+    def get_roles(role: Optional[str] = None) -> str:
+        """What a role (employee, manager, hr or admin) may do: "what can a manager do?".
+        role is optional: without it, a summary of every role. Not for the user's own permissions."""
+        roles = crud_api.call(session, "GET", "/roles")  # live from the CRUD API, never cached
+        if role is None:
+            return as_json({one["name"]: one["description"] for one in roles})
+        chosen = next(one for one in roles if one["name"] == role)  # role is checked by WhichRole
+        return as_json({"role": role, "summary": chosen["description"],
+                        "may": list(chosen["descriptions"].values())})
+
     # ---------- Changes ----------
 
     def submit_leave_request(leave_type: str, start_date: date, end_date: date) -> str:
@@ -470,11 +518,8 @@ def make_tools(session: ChatSession, permissions: list[str]) -> list[FunctionToo
         return decide_team_leave("approve", employee_name, start_date)
 
     def reject_leave_request(employee_name: Optional[str] = None, start_date: Optional[date] = None) -> str:
-        """Reject a pending leave request of the user's team, chosen by employee_name (part of the
-        name is fine) and/or start_date (the first day, YYYY-MM-DD). Both are optional.
-        Only when the user asks to reject leave ("reject Chloe's leave").
-        If the user doesn't say whose leave ("reject leave", "reject the waiting request"), call it
-        with NO arguments: it rejects nothing and lists the waiting requests, so you can ask which one."""
+        """Reject a pending leave request of the user's team ("reject Chloe's leave").
+        The arguments work exactly like approve_leave_request: both are optional."""
         return decide_team_leave("reject", employee_name, start_date)
 
     # ---------- Big changes: the user must confirm them ----------
@@ -528,8 +573,7 @@ def make_tools(session: ChatSession, permissions: list[str]) -> list[FunctionToo
     def update_employee_salary(employee: str, amount: Decimal, effective_date: date) -> str:
         """Propose a new salary: the amount (a number, no currency) from effective_date
         (YYYY-MM-DD). Only when the user asks ("give Sam Lee 90000 from 1 January").
-        employee: a name as the user wrote it, or an employee id. If the amount or date is missing, ask.
-        It only proposes: the user confirms it in the app."""
+        employee: a name as the user wrote it, or an employee id. No need to search first."""
         person, problem = find_one_employee(employee, "employee")
         if person is None:
             return problem
@@ -539,8 +583,7 @@ def make_tools(session: ChatSession, permissions: list[str]) -> list[FunctionToo
     def terminate_employee(employee: str, termination_date: date) -> str:
         """Propose to terminate an employee. termination_date is their last working day
         (YYYY-MM-DD). Only when the user asks ("terminate Sam Lee, last day 31 December").
-        employee: a name as the user wrote it, or an employee id. If the date is missing, ask.
-        It only proposes: the user confirms it in the app."""
+        employee: a name as the user wrote it, or an employee id. No need to search first."""
         person, problem = find_one_employee(employee, "employee")
         if person is None:
             return problem
@@ -549,8 +592,7 @@ def make_tools(session: ChatSession, permissions: list[str]) -> list[FunctionToo
     def change_employee_role(employee: str, role: str) -> str:
         """Propose a new role: employee, manager, hr or admin (what they may see and do in
         this system). Use it for "make Sam Lee a manager" or "give Sam Lee the hr role".
-        employee: a name as the user wrote it, or an employee id.
-        It only proposes: the user confirms it in the app."""
+        employee: a name as the user wrote it, or an employee id. No need to search first."""
         person, problem = find_one_employee(employee, "employee")
         if person is None:
             return problem
@@ -559,9 +601,7 @@ def make_tools(session: ChatSession, permissions: list[str]) -> list[FunctionToo
     def change_employee_manager(employee: str, new_manager: str) -> str:
         """Propose who an employee reports to: "Sam Lee now reports to Kim Park", or
         "Sam Lee no longer has a manager" (new_manager "nobody").
-        Not for "make Sam Lee a manager": that is a role (change_employee_role).
-        employee and new_manager: a name as the user wrote it, or an employee id.
-        It only proposes: the user confirms it in the app."""
+        employee and new_manager: a name as the user wrote it, or an employee id."""
         person, problem = find_one_employee(employee, "employee")
         if person is None:
             return problem
@@ -581,6 +621,8 @@ def make_tools(session: ChatSession, permissions: list[str]) -> list[FunctionToo
         make_tool(get_team_leave, NoArgs),
         make_tool(search_employees, NameSearch),
         make_tool(get_employee, EmployeeId),
+        make_tool(search_policies, PolicyQuestion),
+        make_tool(get_roles, WhichRole),
         make_tool(submit_leave_request, NewLeaveRequest),
         make_tool(cancel_leave_request, LeaveStartDate),
         make_tool(approve_leave_request, WhichTeamLeave),

@@ -18,8 +18,9 @@ llm = Ollama(
     model=OLLAMA_MODEL,
     base_url=OLLAMA_URL,
     temperature=0,          # same question -> (almost) the same answer; no creative guessing
-    # How much text the model reads at once, from .env (4096 = about 3,000 words). Bigger needs
-    # more GPU memory: with 8192 the model no longer fit in a 4 GB GPU, half ran on the CPU, ~3x slower.
+    # How much text the model reads at once, from .env (8192 = about 6,000 words). Bigger needs
+    # more GPU memory: with 8192 the model doesn't fit in a 4 GB GPU, half runs on the CPU, ~3x
+    # slower. We chose room (correct answers) over speed: 4096 left HR almost no room for the chat.
     context_window=OLLAMA_CONTEXT,
     request_timeout=120,    # small local models can be slow, give them 2 minutes
 )
