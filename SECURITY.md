@@ -32,6 +32,12 @@ One more, found while testing: the model once **wrote a fake tool result** in it
 is no termination procedure") instead of calling the tool. The agent never shows such an answer:
 `agent/tests/test_security.py::test_a_made_up_tool_result_never_reaches_the_user`.
 
+A wall below the API: the API connects to PostgreSQL as `gatekeeper_app`, a user that may only
+read and write the rows it needs (`backend/create_app_user.py`). Even if the Python code were
+bypassed, the database itself refuses to change or drop tables, edit or delete the audit log,
+change or delete a salary, delete an employee, change a password or create a login:
+`backend/tests/test_database_rights.py`.
+
 ## What these tests do not cover (yet)
 
 - **Bulk updates are not built.** Every change is one record at a time, and lists return at most

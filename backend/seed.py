@@ -21,9 +21,10 @@ from typing import Callable, Optional
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from app.database import Base, SessionLocal
+from app.database import Base
 from app.models import Department, Employee, LeaveRequest, PerformanceReview, Salary, SuperUser, User
 from app.security import hash_password
+from owner_database import OwnerSession  # the seed creates logins and empties tables: owner work
 
 DEMO_PASSWORD = "Password123!"
 SUPERUSER_EMAIL = "admin@gatekeeper.local"
@@ -470,7 +471,7 @@ def run_part(db: Session, name: str, table: type[Base], seed_function: Callable[
 
 
 def main() -> None:
-    db = SessionLocal()
+    db = OwnerSession()
     try:
         if "--reset" in sys.argv:
             answer = input("This deletes ALL employees, logins, salaries, leave, reviews and the audit log. Type yes to continue: ")

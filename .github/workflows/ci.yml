@@ -40,15 +40,19 @@ jobs:
           cache-dependency-path: backend/requirements.txt
       - run: pip install -r requirements.txt
       - name: Write .env (CI-only values; the database is thrown away after the run)
+        # Two database users, like a real install: the tests create gatekeeper_app themselves
+        # (create_app_user.py) and run the API as it; postgres is the owner.
         run: |
-          echo "DATABASE_URL=postgresql://postgres:postgres@localhost:5432/gatekeeper_hr" > .env
-          echo "TEST_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/gatekeeper_hr_test" >> .env
+          echo "DATABASE_URL=postgresql://gatekeeper_app:ci-app-password@127.0.0.1:5432/gatekeeper_hr" > .env
+          echo "OWNER_DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/gatekeeper_hr" >> .env
+          echo "TEST_DATABASE_URL=postgresql://gatekeeper_app:ci-app-password@127.0.0.1:5432/gatekeeper_hr_test" >> .env
+          echo "TEST_OWNER_DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/gatekeeper_hr_test" >> .env
           echo "JWT_SECRET_KEY=ci-only-secret-0123456789abcdef0123456789abcdef" >> .env
       - name: Tests
         run: python -m pytest -q
       - name: Strict type check
         run: |
-          echo '{"include": ["app", "tests"], "typeCheckingMode": "strict"}' > pyrightconfig.json
+          echo '{"include": ["app", "tests", "create_app_user.py", "owner_database.py", "seed.py", "create_user.py", "create_superuser.py", "alembic/env.py"], "typeCheckingMode": "strict"}' > pyrightconfig.json
           npx --yes pyright@1.1.414
 
   agent:
@@ -120,9 +124,11 @@ jobs:
         working-directory: backend
         run: |
           pip install -r requirements.txt
-          echo "DATABASE_URL=postgresql://postgres:postgres@localhost:5432/gatekeeper_hr" > .env
+          echo "DATABASE_URL=postgresql://gatekeeper_app:ci-app-password@127.0.0.1:5432/gatekeeper_hr" > .env
+          echo "OWNER_DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/gatekeeper_hr" >> .env
           echo "JWT_SECRET_KEY=ci-only-secret-0123456789abcdef0123456789abcdef" >> .env
           alembic upgrade head
+          python create_app_user.py
           python seed.py
           nohup python -m uvicorn app.main:app --port 8000 > ../backend.log 2>&1 &
           for i in $(seq 1 30); do curl -sf http://localhost:8000/health && break; sleep 1; done
@@ -144,7 +150,7 @@ jobs:
       - name: Eval (fails if any check fails)
         working-directory: agent
         env:
-          CRUD_API_URL: http://localhost:8000
+          CRUD_API_URL: http://127.0.0.1:8000
           OLLAMA_CONTEXT: "8192"
         run: |
           pip install -r requirements.txt

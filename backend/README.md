@@ -34,18 +34,30 @@ copy .env.example .env
 ```
 
 Open `.env` and fill in:
-- `DATABASE_URL`: put your PostgreSQL password in place of `YOUR_PASSWORD`
+- `OWNER_DATABASE_URL`: put your PostgreSQL (`postgres`) password in place of `YOUR_PASSWORD`
+- `DATABASE_URL`: make up a password for the API's own database user, `gatekeeper_app`, in place
+  of `APP_PASSWORD` (step 4 creates that user). Make one with
+  `python -c "import secrets; print(secrets.token_urlsafe(24))"`
 - `JWT_SECRET_KEY`: a long random secret. Make one with:
 
   ```
   python -c "import secrets; print(secrets.token_hex(32))"
   ```
 
-**4. Create the tables:**
+**4. Create the tables, and the API's database user:**
 
 ```
 alembic upgrade head
+python create_app_user.py
 ```
+
+Why two database users? The API connects as `gatekeeper_app`, which may only read and write
+the rows it needs. So even if a bug or a leaked password got past the Python code, PostgreSQL
+itself refuses to change or drop tables, edit or delete the audit log, change or delete a salary
+(a raise is always a new row), delete an employee, change a password or create a login. The
+exact rights are the `RIGHTS` table in `create_app_user.py`. Everything else (migrations, the
+seed, `create_user.py`, `create_superuser.py`) runs as the owner, `OWNER_DATABASE_URL`; the
+running API never uses it. `tests/test_database_rights.py` tries each forbidden thing.
 
 **5. Fill the database with demo data** (optional, but recommended):
 
@@ -119,7 +131,9 @@ optional; the AI agent sends one with every write.
 The tests use a **separate** database, so your demo data is never touched. One-time setup:
 
 1. Create the test database: `CREATE DATABASE gatekeeper_hr_test;`
-2. Add `TEST_DATABASE_URL` to your `.env` (see `.env.example`).
+2. Add `TEST_DATABASE_URL` and `TEST_OWNER_DATABASE_URL` to your `.env` (see `.env.example`).
+   Use the same `gatekeeper_app` password as in `DATABASE_URL`: the tests set its rights up on
+   the test database themselves, and run the API as that user, so a missing right fails a test.
 
 Then run all tests with:
 
@@ -137,7 +151,11 @@ After you change `app/models.py`:
 ```
 alembic revision --autogenerate -m "describe the change"
 alembic upgrade head
+python create_app_user.py
 ```
+
+A new table also needs a line in `RIGHTS` in `create_app_user.py` (the script stops and tells
+you if one is missing), then run the script again.
 
 **Always read the new file in `alembic/versions/` before running `upgrade`.** Autogenerate can miss things, for example check constraints added to an existing table.
 

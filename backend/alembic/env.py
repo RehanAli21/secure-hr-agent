@@ -5,7 +5,7 @@ from logging.config import fileConfig
 
 from alembic import context
 
-from app.database import engine
+from owner_database import owner_engine
 from app import models
 
 # Turn on Alembic's log messages (settings come from alembic.ini).
@@ -18,8 +18,9 @@ target_metadata = models.Base.metadata
 
 
 def run_migrations() -> None:
-    # We reuse the same engine as the app, so the URL comes from .env.
-    with engine.connect() as connection:
+    # Migrations create and change tables, so they run as the OWNER (OWNER_DATABASE_URL in .env),
+    # never as the API's user, which isn't allowed to (see create_app_user.py).
+    with owner_engine.connect() as connection:
         context.configure(connection=connection, target_metadata=target_metadata)
         with context.begin_transaction():
             context.run_migrations()

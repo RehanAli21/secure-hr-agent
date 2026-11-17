@@ -5,7 +5,7 @@
 
 from getpass import getpass
 
-from app.database import SessionLocal
+from owner_database import OwnerSession  # creating a login is owner work (see create_app_user.py)
 from app.models import SuperUser
 from app.security import hash_password
 
@@ -18,7 +18,7 @@ def main() -> None:
         print("Password must be at least 8 characters.")
         return
 
-    db = SessionLocal()
+    db = OwnerSession()
     try:
         if db.query(SuperUser).filter(SuperUser.email == email).first() is not None:
             print("A superuser with this email already exists.")
