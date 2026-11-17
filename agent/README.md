@@ -148,7 +148,9 @@ POST /chat "What is my job title?"
 - The model **can't see the token**: tools are built inside `make_tools(session)`, so they use the
   session without it ever being a parameter the model sees.
 - A made-up tool name or argument is refused before anything runs.
-- At most 8 tool calls per message, so a confused model can't loop forever.
+- At most 8 tool calls per message, and at most 5 minutes (`TURN_TIMEOUT_SECONDS`, checked between
+  steps), so a confused model can't loop forever. If it is stopped after a tool that changes
+  something, the reply says so, so the user doesn't think nothing happened and ask again.
 - **Live permissions:** because they are fetched on every message, a role change counts from the next
   message. The model uses them to answer "what can I change?", and each tool is only offered to users
   with the permission it needs (`TOOL_PERMISSIONS` in `app/tools.py`). That filter is only for a better

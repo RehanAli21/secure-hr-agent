@@ -4,9 +4,11 @@
 #      + the list of tools to the model.
 #   2. The model either answers with text (done!) or asks to call a tool.
 #   3. We check the tool name and arguments, run the tool, and give the result back to the model.
-#   4. Go back to 1, but at most MAX_TOOL_CALLS times, so a confused model can't loop forever.
+#   4. Go back to 1, but at most MAX_TOOL_CALLS times and TURN_TIMEOUT_SECONDS long, so a confused
+#      model can't loop forever.
 #   5. Remember the finished turn, for the next message.
 
+import time
 from dataclasses import dataclass
 from datetime import date
 from typing import Any, Optional
@@ -20,6 +22,10 @@ from app.sessions import ChatSession
 from app.tools import WRITE_TOOLS, make_tools
 
 MAX_TOOL_CALLS = 8
+# One message may take at most this long. The model is slow on a small GPU (one step can take half
+# a minute), so this is generous. It is checked between steps: a step that is running is not cut
+# off (app/llm.py gives every step its own limit of 120 seconds).
+TURN_TIMEOUT_SECONDS = 300
 # At most one change per message, so a confused (or tricked) model can't make lots of changes at once.
 MAX_CHANGES_PER_MESSAGE = 1
 # Said instead of an answer in which the model made up a tool result (see run_turn).
@@ -125,6 +131,16 @@ def run_turn(session: ChatSession, user_message: str) -> TurnResult:
     turn = [ChatMessage(role=MessageRole.USER, content=user_message)]  # this turn, growing as we go
     used_tools: list[str] = []
     changes = 0  # how many changing tools (WRITE_TOOLS) the model called in this message
+    started = time.monotonic()  # a clock that never jumps, for the time limit
+
+    def stop_early(reply: str) -> TurnResult:
+        """End this message before the model has answered. Never hide that something changed."""
+        if changes > 0:
+            reply += (" Before I stopped, I had already used a tool that changes something: please"
+                      " check what was done before you ask again.")
+        turn.append(ChatMessage(role=MessageRole.ASSISTANT, content=reply))
+        memory.remember(session, turn)
+        return TurnResult(reply=reply, tool_calls=used_tools, pending_action=session.proposed_action)
 
     while True:
         answer = llm.ask_llm([rules, *earlier, *turn], tools)
@@ -144,10 +160,7 @@ def run_turn(session: ChatSession, user_message: str) -> TurnResult:
 
         # Loop limit: stop a confused model that keeps calling tools.
         if len(used_tools) + len(tool_calls) > MAX_TOOL_CALLS:
-            reply = "Sorry, that took too many steps. Please ask in a simpler way."
-            turn.append(ChatMessage(role=MessageRole.ASSISTANT, content=reply))
-            memory.remember(session, turn)
-            return TurnResult(reply=reply, tool_calls=used_tools, pending_action=session.proposed_action)
+            return stop_early("Sorry, that took too many steps. Please ask in a simpler way.")
 
         # Remember that the model asked for these tools, then add each tool's result.
         turn.append(answer)
@@ -162,3 +175,7 @@ def run_turn(session: ChatSession, user_message: str) -> TurnResult:
                 result = run_tool(tools, call)
             tool_result = wrap_as_data(result)
             turn.append(ChatMessage(role=MessageRole.TOOL, content=tool_result))
+
+        # Time limit: don't ask the model again if this message already took too long.
+        if time.monotonic() - started > TURN_TIMEOUT_SECONDS:
+            return stop_early("Sorry, that took too long, so I stopped. Please try again, maybe in a simpler way.")

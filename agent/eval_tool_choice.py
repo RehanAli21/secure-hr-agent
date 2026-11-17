@@ -192,6 +192,9 @@ def main() -> None:
         total_passed += passed
         total += count
     print(f"\nTotal: {total_passed}/{total}")
+    # Exit code 1 = something failed, so CI (.github/workflows/ci.yml) marks the run as failed.
+    if total_passed < total:
+        sys.exit(1)
 
 
 if __name__ == "__main__":

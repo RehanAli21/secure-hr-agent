@@ -13,3 +13,7 @@ who is logged in.
 Start them in that order: backend, agent (with Ollama running), then the frontend.
 
 [`SECURITY.md`](SECURITY.md) lists the attacks the design must survive, and the tests that prove it does.
+
+**CI** ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)): GitHub runs the backend, agent and frontend
+checks on every push. The eval with the real AI model is slow on GitHub's computers (no GPU), so it
+only runs when you start it by hand (Actions tab, CI, "Run workflow") and every Monday night.

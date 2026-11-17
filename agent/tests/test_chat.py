@@ -5,7 +5,7 @@ import pytest
 from fastapi.testclient import TestClient
 from llama_index.llms.ollama import Ollama  # pyright: ignore[reportMissingTypeStubs] (see app/llm.py)
 
-from app import llm
+from app import agent, llm
 from app.agent import MAX_TOOL_CALLS
 from tests.fake_crud_api import EMAIL, PASSWORD, REFRESH_TOKEN, FakeCrudApi
 from tests.fake_llm import FakeLLM, text_reply, tool_call_reply
@@ -138,6 +138,36 @@ def test_the_agent_stops_after_too_many_tool_calls(client: TestClient, fake_llm:
 
     assert answer["tool_calls"] == ["get_my_profile"] * MAX_TOOL_CALLS
     assert "too many steps" in str(answer["reply"])
+    assert "already used a tool that changes something" not in str(answer["reply"])  # it only read
+
+
+def test_a_message_that_takes_too_long_is_stopped(
+    client: TestClient, fake_llm: FakeLLM, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    log_in(client)
+    monkeypatch.setattr(agent, "TURN_TIMEOUT_SECONDS", -1)  # every message is "too slow" after one step
+    fake_llm.script = [tool_call_reply("get_my_profile"), text_reply("You are a developer.")]
+
+    answer = chat(client, "Show my profile")
+
+    assert answer["tool_calls"] == ["get_my_profile"]  # the tool ran, but the model was not asked again
+    assert str(answer["reply"]).startswith("Sorry, that took too long, so I stopped.")
+    assert len(fake_llm.seen_messages) == 1
+
+
+def test_a_stopped_message_says_that_something_changed(
+    client: TestClient, fake_api: FakeCrudApi, fake_llm: FakeLLM, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Stopping must never hide a change: the user would think nothing happened, and ask again.
+    log_in(client)
+    monkeypatch.setattr(agent, "TURN_TIMEOUT_SECONDS", -1)
+    leave: dict[str, object] = {"leave_type": "annual", "start_date": "2099-03-02", "end_date": "2099-03-06"}
+    fake_llm.script = [tool_call_reply("submit_leave_request", leave), text_reply("Done.")]
+
+    answer = chat(client, "Leave from 2 to 6 March 2099")
+
+    assert "POST" in [r.method for r in fake_api.requests if r.url.path == "/leave"]
+    assert "Before I stopped, I had already used a tool that changes something" in str(answer["reply"])
 
 
 # ---------- The real model wrapper ----------
