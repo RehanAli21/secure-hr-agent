@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Where the CRUD API lives, for example http://localhost:8000
+# Where the CRUD API lives, for example http://127.0.0.1:8000 (see .env.example: why not "localhost")
 # This is the ONLY way the agent service reaches HR data. It has no database password.
 CRUD_API_URL = os.getenv("CRUD_API_URL", "")
 
@@ -15,7 +15,7 @@ if CRUD_API_URL == "":
     raise RuntimeError("CRUD_API_URL is missing. Copy .env.example to .env and fill it in.")
 
 # The AI model, running locally in Ollama. Download it first with:  ollama pull qwen3:4b-instruct
-OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
+OLLAMA_URL = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen3:4b-instruct")
 
 # How much text (in tokens) the model reads at once. Bigger = room for more, but needs more GPU memory.

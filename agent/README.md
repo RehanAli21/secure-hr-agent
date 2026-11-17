@@ -177,6 +177,30 @@ Agent: Leila Ali.
 - The memory lives in your session on the server: `POST /chat/new` or logging out forgets it.
   A message that fails (for example, Ollama is down) is not remembered.
 
+## Traces: what happened inside a message
+
+Every chat message writes one line of JSON to `traces/<date>.jsonl` (in this folder, never in
+git): the user's role, how long it took, how it ended, and each step: which tools the model
+called, with which arguments, what came back (`ok`, `error 403`, `wrong arguments`,
+`no such tool`...) and how long each step took. A real one, for "Give Chloe Miller a salary of
+99000 from 1 January 2027" (the tool step took 2.08 s then; 0.05 s is after the "localhost" fix below):
+
+```
+{"chat": "02875c9d", "role": "hr", "seconds": 27.84, "outcome": "answer", "pending_action": 25,
+ "steps": [{"step": "model", "seconds": 12.61, "calls": ["update_employee_salary"]},
+           {"step": "tool", "tool": "update_employee_salary", "seconds": 0.05, "result": "ok",
+            "args": {"employee": "<hidden>", "amount": "<hidden>", "effective_date": "2027-01-01"}},
+           {"step": "model", "seconds": 13.14, "calls": []}]}
+```
+
+Traces are **redacted**: never a token or the session cookie (`chat` is a separate random id),
+never the user's message, the answer or a tool result (only their sizes), and only safe argument
+values (dates, leave types, roles); names and amounts show as `<hidden>`. A test checks this.
+Read them with any text editor; delete old files whenever you like.
+
+The traces already found one problem: every call took 2 seconds, because on Windows "localhost"
+tries IPv6 first. The settings now use `127.0.0.1`.
+
 ## How login works
 
 ```

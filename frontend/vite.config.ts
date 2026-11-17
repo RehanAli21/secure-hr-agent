@@ -11,7 +11,8 @@ export default defineConfig({
     // login cookie just works and we don't need any CORS settings.
     proxy: {
       "/api": {
-        target: "http://localhost:8001",
+        // 127.0.0.1, not "localhost": on Windows that waits ~2 s for IPv6 first, on every request.
+        target: "http://127.0.0.1:8001",
         rewrite: (path) => path.replace(/^\/api/, ""),
       },
     },

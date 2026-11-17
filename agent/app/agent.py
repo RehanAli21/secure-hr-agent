@@ -7,6 +7,7 @@
 #   4. Go back to 1, but at most MAX_TOOL_CALLS times and TURN_TIMEOUT_SECONDS long, so a confused
 #      model can't loop forever.
 #   5. Remember the finished turn, for the next message.
+#   6. Write down what happened, step by step, without the private parts (app/tracing.py).
 
 import time
 from dataclasses import dataclass
@@ -17,7 +18,7 @@ from llama_index.core.base.llms.types import ChatMessage, MessageRole, ToolCallB
 from llama_index.core.tools import FunctionTool
 from pydantic import ValidationError
 
-from app import crud_api, llm, memory
+from app import crud_api, llm, memory, tracing
 from app.sessions import ChatSession
 from app.tools import WRITE_TOOLS, make_tools
 
@@ -118,11 +119,27 @@ def wrap_as_data(text: str) -> str:
 
 
 def run_turn(session: ChatSession, user_message: str) -> TurnResult:
-    """Answer one chat message for the logged-in user."""
+    """Answer one chat message for the logged-in user, and write its trace (even when it fails)."""
+    trace = tracing.Trace(chat=session.chat_id, message_size=len(user_message))
+    try:
+        result = answer_message(session, user_message, trace)
+    except Exception as error:
+        # For example Ollama is not running (503). The trace says so, without the error's text.
+        trace.outcome = f"failed: {getattr(error, 'status_code', type(error).__name__)}"
+        trace.finish()
+        raise
+    pending = result.pending_action["id"] if result.pending_action else None
+    trace.finish(reply_size=len(result.reply), pending_action=pending)
+    return result
+
+
+def answer_message(session: ChatSession, user_message: str, trace: tracing.Trace) -> TurnResult:
+    """The agent loop for one message (see the top of this file). Every step goes into the trace."""
     # Ask the CRUD API what this user may do, fresh on EVERY message (never cached),
     # so a role change counts from the very next message.
     session.proposed_action = None  # a proposal belongs to the message that made it
     my_permissions = crud_api.call(session, "GET", "/me/permissions")
+    trace.role = my_permissions["role"]
     tools = make_tools(session, my_permissions["permissions"])
 
     # The rules: rebuilt fresh every message, never stored in the chat memory.
@@ -133,8 +150,9 @@ def run_turn(session: ChatSession, user_message: str) -> TurnResult:
     changes = 0  # how many changing tools (WRITE_TOOLS) the model called in this message
     started = time.monotonic()  # a clock that never jumps, for the time limit
 
-    def stop_early(reply: str) -> TurnResult:
+    def stop_early(reply: str, why: str) -> TurnResult:
         """End this message before the model has answered. Never hide that something changed."""
+        trace.outcome = why
         if changes > 0:
             reply += (" Before I stopped, I had already used a tool that changes something: please"
                       " check what was done before you ask again.")
@@ -143,8 +161,10 @@ def run_turn(session: ChatSession, user_message: str) -> TurnResult:
         return TurnResult(reply=reply, tool_calls=used_tools, pending_action=session.proposed_action)
 
     while True:
+        step_started = time.monotonic()
         answer = llm.ask_llm([rules, *earlier, *turn], tools)
         tool_calls = [block for block in answer.blocks if isinstance(block, ToolCallBlock)]
+        trace.model_step(time.monotonic() - step_started, [call.tool_name for call in tool_calls])
 
         # No tool call: this is the final answer for the user.
         if not tool_calls:
@@ -153,6 +173,7 @@ def run_turn(session: ChatSession, user_message: str) -> TurnResult:
                 # "<tool_result>... no termination procedure ...</tool_result>"). That is made-up
                 # data, so the user never sees it.
                 answer = ChatMessage(role=MessageRole.ASSISTANT, content=MADE_UP_RESULT_REPLY)
+                trace.outcome = "made-up tool result, not shown"
             turn.append(answer)
             memory.remember(session, turn)
             return TurnResult(reply=answer.content or "", tool_calls=used_tools,
@@ -160,12 +181,13 @@ def run_turn(session: ChatSession, user_message: str) -> TurnResult:
 
         # Loop limit: stop a confused model that keeps calling tools.
         if len(used_tools) + len(tool_calls) > MAX_TOOL_CALLS:
-            return stop_early("Sorry, that took too many steps. Please ask in a simpler way.")
+            return stop_early("Sorry, that took too many steps. Please ask in a simpler way.", "too many steps")
 
         # Remember that the model asked for these tools, then add each tool's result.
         turn.append(answer)
         for call in tool_calls:
             used_tools.append(call.tool_name)
+            step_started = time.monotonic()
             if call.tool_name in WRITE_TOOLS and changes >= MAX_CHANGES_PER_MESSAGE:
                 # Not run at all: the model tells the user, who can ask again in a new message.
                 result = "Error: only one change per message. Tell the user what was done, and ask them to send the next change in a new message."
@@ -173,9 +195,11 @@ def run_turn(session: ChatSession, user_message: str) -> TurnResult:
                 if call.tool_name in WRITE_TOOLS:
                     changes += 1
                 result = run_tool(tools, call)
+            trace.tool_step(call.tool_name, call.tool_kwargs, time.monotonic() - step_started, result)
             tool_result = wrap_as_data(result)
             turn.append(ChatMessage(role=MessageRole.TOOL, content=tool_result))
 
         # Time limit: don't ask the model again if this message already took too long.
         if time.monotonic() - started > TURN_TIMEOUT_SECONDS:
-            return stop_early("Sorry, that took too long, so I stopped. Please try again, maybe in a simpler way.")
+            return stop_early("Sorry, that took too long, so I stopped. Please try again, maybe in a simpler way.",
+                              "too long")

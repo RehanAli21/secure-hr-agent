@@ -5,3 +5,6 @@ __pycache__/
 .env
 node_modules/
 dist/
+
+# The agent's traces (app/tracing.py): they stay on this computer.
+traces/

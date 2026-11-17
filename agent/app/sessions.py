@@ -24,6 +24,12 @@ def empty_history() -> list[list[ChatMessage]]:
     return []
 
 
+def new_chat_id() -> str:
+    """A short random id for the traces (app/tracing.py), like "3f9c1a2b". NOT the session id:
+    that one works like a password, so it must never be written anywhere."""
+    return secrets.token_hex(4)
+
+
 @dataclass
 class ChatSession:
     # repr=False: if a session is ever printed or logged, the tokens are left out.
@@ -36,6 +42,8 @@ class ChatSession:
     # A big change the agent proposed in the CURRENT message (e.g. a new salary), waiting for the
     # user's Confirm button. Set by the tool, sent to the page with the reply (see app/agent.py).
     proposed_action: Optional[dict[str, Any]] = field(default=None, repr=False)
+    # Which chat a trace belongs to (see new_chat_id).
+    chat_id: str = field(default_factory=new_chat_id)
 
 
 # session id -> that user's tokens and chat
