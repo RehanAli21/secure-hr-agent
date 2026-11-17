@@ -41,6 +41,7 @@ from sqlalchemy.orm import Session
 
 from app.database import Base, SessionLocal, engine
 from app.main import app
+from app.rate_limits import forget_all
 from tests.helpers import Org, create_org
 
 
@@ -84,6 +85,7 @@ def client(db: Session) -> TestClient:
 
     It asks for `db` too, so the database is always emptied first.
     """
+    forget_all()  # the rate limits start counting from zero for every test
     return TestClient(app)
 
 

@@ -91,6 +91,21 @@ When the AI agent asks for one (it sends the header `X-Request-Source: agent`), 
 
 Every change, confirmed or not, is written to the audit log: `GET /audit-log` (hr and admin only).
 
+## Rate limits and idempotency keys
+
+**Rate limits** (`app/rate_limits.py`): each user may send 300 reads and 30 writes per minute, and
+each email address may try to log in 10 times per minute. Over the limit, the API answers
+`429 Too many requests` with a `Retry-After` header (seconds to wait). The counts live in memory:
+a restart resets them, and with several server processes each one counts on its own.
+
+**Idempotency keys** (`app/idempotency.py`): a write may carry an `Idempotency-Key` header (any
+text up to 100 characters, e.g. a random UUID). If the same user sends the same request with the
+same key again, for example a retry after a timeout, the API does NOT run it again: it sends back
+the saved first answer, with the header `Idempotent-Replayed: true`. The same key for a different
+request gives 422; while the first one is still running, 409. Server errors are not saved, so a
+retry runs for real. Keys are kept for 24 hours in the `idempotency_keys` table. The header is
+optional; the AI agent sends one with every write.
+
 ## Other useful commands
 
 | Command | What it does |

@@ -111,9 +111,15 @@ class FakeCrudApi:
         self.access_token = "access-token-1"  # the only access token that works right now
         self.refresh_works = True             # set to False to pretend the login has ended
         self.employee_status = 200            # set to e.g. 403 to pretend the CRUD API says no
+        self.network_failures: dict[str, int] = {}  # see fail_the_network()
         self.permissions: dict[str, Any] = EMPLOYEE_PERMISSIONS  # what GET /me/permissions answers
         self.requests: list[httpx.Request] = []
         self.actions: dict[int, dict[str, Any]] = {}  # pending actions, by id (POST /actions)
+
+    def fail_the_network(self, request: str, times: int) -> None:
+        """The next `times` requests like "POST /leave" time out, as if the network failed.
+        (They are still recorded: maybe the CRUD API got them, maybe not. The agent can't know.)"""
+        self.network_failures[request] = times
 
     def expire_access_token(self) -> None:
         """Pretend 15 minutes have passed: the old access token stops working."""
@@ -121,6 +127,10 @@ class FakeCrudApi:
 
     def handle(self, request: httpx.Request) -> httpx.Response:
         self.requests.append(request)
+        which = f"{request.method} {request.url.path}"
+        if self.network_failures.get(which, 0) > 0:
+            self.network_failures[which] -= 1
+            raise httpx.ReadTimeout("The fake CRUD API was too slow", request=request)
         path = request.url.path
 
         if path == "/health":

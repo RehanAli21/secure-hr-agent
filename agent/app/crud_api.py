@@ -7,6 +7,7 @@
 # This is also the ONLY file that touches the tokens. They go into the Authorization header
 # and nowhere else: never into a prompt, a tool argument or a log.
 
+import uuid
 from typing import Any, Optional
 
 import httpx
@@ -84,14 +85,25 @@ def call(
       Every tool uses "agent". Only the Confirm and Cancel buttons send "ui": a person clicked.
     - The access token only lasts 15 minutes. If it has run out (401), we get a new one with the
       refresh token and try once more.
+    - Every write gets an Idempotency-Key: a random id for THIS change. When we send it again (after
+      a new token, or a network failure), the same key goes with it, so the CRUD API makes the
+      change only once (see backend/app/idempotency.py).
     """
+    idempotency_key = None if method == "GET" else str(uuid.uuid4())
 
     def send() -> httpx.Response:
         headers = {"Authorization": f"Bearer {session.access_token}", "X-Request-Source": source}
+        if idempotency_key is not None:
+            headers["Idempotency-Key"] = idempotency_key
         return http.request(method, path, json=json, params=params, headers=headers)
 
     try:
-        response = send()
+        try:
+            response = send()
+        except httpx.TransportError:
+            # The network failed, or the CRUD API was too slow to answer. Did the request arrive?
+            # We can't know. Sending it once more is safe: a write carries the same key.
+            response = send()
         if response.status_code == 401:
             new_token = get_new_access_token(session)
             if new_token is None:

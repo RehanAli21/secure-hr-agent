@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.rate_limits import limit_logins, rate_limit
 from app.models import SuperUser, User
 from app.schemas import AccessTokenOut, LoginRequest, MeOut, RefreshRequest, TokensOut
 from app.security import (
@@ -22,6 +23,7 @@ router = APIRouter(tags=["Auth"])
 @router.post("/auth/login", response_model=TokensOut)
 def login(data: LoginRequest, db: Session = Depends(get_db)):
     """Log in as a normal user."""
+    limit_logins(data.email)  # before checking the password, so guessing passwords is slow
     user = db.query(User).filter(User.email == data.email).first()
 
     # We give the SAME error for "no such email" and "wrong password",
@@ -41,6 +43,7 @@ def login(data: LoginRequest, db: Session = Depends(get_db)):
 @router.post("/auth/superuser/login", response_model=TokensOut)
 def superuser_login(data: LoginRequest, db: Session = Depends(get_db)):
     """Log in as a superuser (an account that can access everything)."""
+    limit_logins(data.email)
     superuser = db.query(SuperUser).filter(SuperUser.email == data.email).first()
 
     if superuser is None or not verify_password(data.password, superuser.password_hash):
@@ -63,7 +66,7 @@ def refresh(data: RefreshRequest, db: Session = Depends(get_db)):
     return AccessTokenOut(access_token=create_access_token(account.id, kind))
 
 
-@router.get("/me", response_model=MeOut)
+@router.get("/me", response_model=MeOut, dependencies=[Depends(rate_limit)])
 def me(current_user: Account = Depends(get_current_user)):
     """Return the logged-in account. Who you are comes only from your token."""
     if isinstance(current_user, SuperUser):

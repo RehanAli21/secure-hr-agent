@@ -268,3 +268,31 @@ class PendingAction(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     decided_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+
+
+class IdempotencyKey(Base):
+    """A write request that came with an Idempotency-Key header, and the answer it got.
+
+    If the same request comes again with the same key (a retry after a timeout, a double click),
+    the API sends back this saved answer instead of making the change a second time.
+    See app/idempotency.py.
+    """
+
+    __tablename__ = "idempotency_keys"
+    # A key belongs to one account: two users may (by chance) pick the same key.
+    __table_args__ = (Index("uq_idempotency_keys_account_key", "account_kind", "account_id", "key", unique=True),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    account_kind: Mapped[str] = mapped_column(String)  # "user" or "superuser"
+    account_id: Mapped[int]
+    key: Mapped[str] = mapped_column(String(100))
+
+    # A fingerprint of the request (method, path and body), so the same key can't be reused for
+    # a DIFFERENT request.
+    request_hash: Mapped[str] = mapped_column(String(64))
+
+    # The saved answer. Both are empty while the first request is still running.
+    status_code: Mapped[Optional[int]]
+    response_body: Mapped[Optional[str]] = mapped_column(Text)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
