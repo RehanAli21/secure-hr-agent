@@ -5,8 +5,9 @@
 
 import { FormEvent, useEffect, useRef, useState } from "react";
 
+import ChartCard from "./ChartCard";
 import ConfirmCard from "./ConfirmCard";
-import { ApiError, Me, PendingAction, sendMessage, startNewChat } from "./api";
+import { ApiError, Chart, Me, PendingAction, sendMessage, startNewChat } from "./api";
 
 // One bubble on the screen.
 type Message = {
@@ -14,6 +15,7 @@ type Message = {
   text: string;
   tools?: string[]; // the tools the agent used for this answer
   action?: PendingAction; // a big change waiting for Confirm (shown as a card under the answer)
+  chart?: Chart; // numbers to draw under the answer
 };
 
 type Props = {
@@ -55,6 +57,7 @@ export default function ChatPage({ me, onLogOut, onSessionLost }: Props) {
         text: answer.reply,
         tools: answer.tool_calls,
         action: answer.pending_action ?? undefined,
+        chart: answer.chart ?? undefined,
       });
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) {
@@ -106,6 +109,7 @@ export default function ChatPage({ me, onLogOut, onSessionLost }: Props) {
                 <div className="tools">Used: {message.tools.join(", ")}</div>
               )}
             </div>
+            {message.chart && <ChartCard chart={message.chart} />}
             {message.action && <ConfirmCard action={message.action} onSessionLost={onSessionLost} />}
           </div>
         ))}

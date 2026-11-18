@@ -91,6 +91,8 @@ class TurnResult:
     tool_calls: list[str]  # the names of the tools it used, to show what the agent did
     # A big change waiting for the user's Confirm button: {"id", "summary", "expires_at"}, or None.
     pending_action: Optional[dict[str, Any]] = None
+    # Numbers to draw under the answer: {"title", "details", "kind", "points"}, or None.
+    chart: Optional[dict[str, Any]] = None
 
 
 def run_tool(tools: list[FunctionTool], call: ToolCallBlock) -> str:
@@ -138,6 +140,7 @@ def answer_message(session: ChatSession, user_message: str, trace: tracing.Trace
     # Ask the CRUD API what this user may do, fresh on EVERY message (never cached),
     # so a role change counts from the very next message.
     session.proposed_action = None  # a proposal belongs to the message that made it
+    session.chart = None            # and so does a chart
     my_permissions = crud_api.call(session, "GET", "/me/permissions")
     trace.role = my_permissions["role"]
     tools = make_tools(session, my_permissions["permissions"])
@@ -158,7 +161,8 @@ def answer_message(session: ChatSession, user_message: str, trace: tracing.Trace
                       " check what was done before you ask again.")
         turn.append(ChatMessage(role=MessageRole.ASSISTANT, content=reply))
         memory.remember(session, turn)
-        return TurnResult(reply=reply, tool_calls=used_tools, pending_action=session.proposed_action)
+        return TurnResult(reply=reply, tool_calls=used_tools, pending_action=session.proposed_action,
+                          chart=session.chart)
 
     while True:
         step_started = time.monotonic()
@@ -177,7 +181,7 @@ def answer_message(session: ChatSession, user_message: str, trace: tracing.Trace
             turn.append(answer)
             memory.remember(session, turn)
             return TurnResult(reply=answer.content or "", tool_calls=used_tools,
-                              pending_action=session.proposed_action)
+                              pending_action=session.proposed_action, chart=session.chart)
 
         # Loop limit: stop a confused model that keeps calling tools.
         if len(used_tools) + len(tool_calls) > MAX_TOOL_CALLS:

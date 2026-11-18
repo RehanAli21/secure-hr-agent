@@ -103,6 +103,14 @@ ROLES = [
      "descriptions": {"view_all_employees": "See every employee",
                       "terminate_employee": "Terminate employees (this also disables their login)"}},
 ]
+# What GET /analytics answers (for any question): numbers only, like the real one.
+ANALYTICS: dict[str, Any] = {
+    "metric": "average_salary", "description": "Average current salary of active employees",
+    "group_by": "department", "scope": "company", "from_date": None, "to_date": None,
+    "rows": [{"group": "Engineering", "value": 104325.0, "people": 148},
+             {"group": "Sales", "value": 77737.5, "people": 96}],
+    "hidden_groups": 1, "note": "1 group(s) about fewer than 5 people are not shown.",
+}
 NO_PERMISSIONS: dict[str, Any] = {"kind": "user", "role": "employee", "is_manager": False, "permissions": [], "descriptions": {}}
 
 
@@ -111,6 +119,8 @@ class FakeCrudApi:
         self.access_token = "access-token-1"  # the only access token that works right now
         self.refresh_works = True             # set to False to pretend the login has ended
         self.employee_status = 200            # set to e.g. 403 to pretend the CRUD API says no
+        self.analytics_status = 200           # the same, for GET /analytics
+        self.analytics = ANALYTICS            # what GET /analytics answers
         self.network_failures: dict[str, int] = {}  # see fail_the_network()
         self.permissions: dict[str, Any] = EMPLOYEE_PERMISSIONS  # what GET /me/permissions answers
         self.requests: list[httpx.Request] = []
@@ -250,6 +260,11 @@ class FakeCrudApi:
 
         if path == "/departments":
             return httpx.Response(200, json=DEPARTMENTS)
+
+        if path == "/analytics":
+            if self.analytics_status != 200:
+                return httpx.Response(self.analytics_status, json={"detail": "Salary numbers are only for analysts, HR and admins"})
+            return httpx.Response(200, json=self.analytics)
 
         if path == "/roles":
             return httpx.Response(200, json=ROLES)

@@ -1,8 +1,10 @@
 # Who is allowed to do what. Every permission rule lives in this one file.
 #
-# The four roles:
+# The five roles:
 #   employee -> can see only their own profile
 #   manager  -> can see their own profile + their direct reports
+#   analyst  -> like an employee, plus company-wide NUMBERS (analytics): totals and averages,
+#               never one person's record (see app/routers/analytics.py)
 #
 # Being someone's manager is not about the role: whoever is set as their manager_id is their
 # manager, whatever their role. So "can I see my reports?" checks manager_id, never the role name.
@@ -22,10 +24,13 @@ from app.audit import Origin
 from app.models import Employee, SuperUser
 from app.security import Account
 
-ROLES = ("employee", "manager", "hr", "admin")
+ROLES = ("employee", "manager", "analyst", "hr", "admin")
 
 # The roles that manage HR data for the whole company.
 HR_ROLES = ("hr", "admin")
+
+# The roles that see analytics for the whole company. (Managers see them for their own team.)
+ANALYTICS_ROLES = ("analyst", "hr", "admin")
 
 
 def require_role(account: Account, allowed_roles: tuple[str, ...]) -> None:
@@ -150,6 +155,8 @@ ROLE_DESCRIPTIONS = {
                 "Submits and cancels their own leave.",
     "manager": "Everything an employee can do. Also sees their direct reports' profiles, leave and reviews "
                "(not their salaries), approves or rejects their leave and writes their reviews.",
+    "analyst": "Everything an employee can do. Also sees company-wide numbers (headcount, hires, leavers, "
+               "salary and leave totals, review ratings), but never one person's record.",
     "hr": "Sees all employees, including salaries. Creates and changes employees, departments, salaries "
           "and roles. Terminates employees. Deletes and restores records. Reads the audit log.",
     "admin": "Everything HR can do. Only admins can give someone the admin role or take it away.",
@@ -163,18 +170,21 @@ EMPLOYEE_PERMISSIONS = [
 # Anyone with direct reports gets these, whatever their role (the check is "are you their manager?").
 MANAGER_PERMISSIONS = [
     "view_reports_profiles", "view_reports_leave", "decide_reports_leave",
-    "view_reports_reviews", "write_reports_reviews",
+    "view_reports_reviews", "write_reports_reviews", "view_team_analytics",
 ]
+
+ANALYST_PERMISSIONS = ["view_analytics"]
 
 HR_PERMISSIONS = [
     "view_all_employees", "create_employee", "update_employee", "terminate_employee",
     "view_all_salaries", "change_salary", "change_role", "manage_departments",
-    "delete_records", "restore_records", "view_audit_log",
+    "delete_records", "restore_records", "view_audit_log", "view_analytics",
 ]
 
 ROLE_PERMISSIONS = {
     "employee": EMPLOYEE_PERMISSIONS,
     "manager": EMPLOYEE_PERMISSIONS + MANAGER_PERMISSIONS,
+    "analyst": EMPLOYEE_PERMISSIONS + ANALYST_PERMISSIONS,
     "hr": EMPLOYEE_PERMISSIONS + HR_PERMISSIONS,
     "admin": EMPLOYEE_PERMISSIONS + HR_PERMISSIONS + ["grant_admin_role"],
 }
@@ -195,6 +205,12 @@ PERMISSION_DESCRIPTIONS = {
     "decide_reports_leave": "Approve or reject the leave requests of the people who report to you",
     "view_reports_reviews": "See the performance reviews of the people who report to you",
     "write_reports_reviews": "Write performance reviews for the people who report to you",
+    "view_team_analytics": "See numbers about the people who report to you (headcount, hires, leavers, "
+                           "leave days, review ratings), but not salaries",
+    # analyst (and hr, admin)
+    "view_analytics": "See numbers about the whole company: headcount, hires, leavers, salary and leave "
+                      "totals, review ratings. Groups of fewer than 5 people are hidden for salaries, "
+                      "leave and ratings, so no one person's details can be worked out",
     # hr
     "view_all_employees": "See every employee",
     "create_employee": "Add new employees",

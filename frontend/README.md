@@ -35,6 +35,7 @@ The password of every demo user is `Password123!`.
 | `src/LoginPage.tsx` | The login form |
 | `src/ChatPage.tsx` | The chat: messages, "New chat" and "Log out" |
 | `src/ConfirmCard.tsx` | The Confirm / Cancel card for a big change the agent proposed |
+| `src/ChartCard.tsx` | A chart under an analytics answer (bars by group, a line over months or years), plus "Show the numbers" as a table. Drawn with [Recharts](https://recharts.org), the one library besides React. The numbers come from the CRUD API through the agent's code, never from the AI's text |
 | `src/api.ts` | Every call to the agent service |
 | `src/styles.css` | All the styling |
 | `vite.config.ts` | Forwards `/api/...` to the agent service |

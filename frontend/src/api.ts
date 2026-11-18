@@ -17,11 +17,20 @@ export type PendingAction = {
   expires_at: string; // after this time (5 minutes), it can't be confirmed any more
 };
 
+// Numbers to draw under an answer. They come from the CRUD API's analytics, not from the AI's words.
+export type Chart = {
+  title: string; // e.g. "Average current salary of active employees (no currency)"
+  details: string; // e.g. "by department"
+  kind: "bar" | "line"; // a line for months and years, bars for everything else
+  points: { label: string; value: number }[];
+};
+
 // One answer from the chat (from POST /chat).
 export type ChatReply = {
   reply: string;
   tool_calls: string[]; // the tools the agent used, e.g. ["get_my_profile"]
   pending_action: PendingAction | null;
+  chart: Chart | null;
 };
 
 // The answer to a Confirm or Cancel click.

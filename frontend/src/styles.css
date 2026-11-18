@@ -226,3 +226,52 @@ input {
 .confirm-result {
   font-weight: 600;
 }
+
+/* ---------- Chart (numbers about many people) ---------- */
+
+.chart-card {
+  align-self: flex-start;
+  width: 80%;
+  margin: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.chart-card figcaption {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.chart-card summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 0.9em;
+}
+
+.chart-card table {
+  margin-top: 6px;
+  border-collapse: collapse;
+}
+
+.chart-card td {
+  padding: 2px 12px 2px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.chart-card td.number {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* On a phone, use the whole width. */
+@media (max-width: 600px) {
+  .chart-card {
+    width: 100%;
+  }
+}

@@ -18,7 +18,7 @@ def change_role(client: TestClient, headers: dict[str, str], employee_id: int, r
 def test_everyone_can_list_the_roles(client: TestClient, org: Org) -> None:
     response = client.get("/roles", headers=log_in(client, org.report.email))
 
-    assert [role["name"] for role in response.json()] == ["employee", "manager", "hr", "admin"]
+    assert [role["name"] for role in response.json()] == ["employee", "manager", "analyst", "hr", "admin"]
 
 
 def test_my_permissions_match_my_role(client: TestClient, org: Org) -> None:

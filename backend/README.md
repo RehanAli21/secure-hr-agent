@@ -118,6 +118,32 @@ request gives 422; while the first one is still running, 409. Server errors are 
 retry runs for real. Keys are kept for 24 hours in the `idempotency_keys` table. The header is
 optional; the AI agent sends one with every write.
 
+## Analytics (numbers about many people)
+
+`GET /analytics` answers questions like "average salary by department" or "sick days by month".
+The question is never SQL: it is a choice from fixed lists, and the API runs its own queries
+(`app/analytics.py`). Try it at `/docs`.
+
+| Parameter | Choices |
+| --- | --- |
+| `metric` | `headcount`, `new_hires`, `leavers`, `average_salary`, `payroll_total`, `leave_days`, `average_rating` |
+| `group_by` | `department`, `month`, `year`, `leave_type`, `period` (each metric allows only some; leave it out for one number) |
+| `department`, `leave_type` | narrow it down (`leave_type` only for `leave_days`) |
+| `from_date`, `to_date` | for `new_hires`, `leavers`, `leave_days` (default: the last 12 months, at most 5 years) |
+
+Who may ask: the **analyst** role (new; in the demo data, the Financial Analysts, for example
+`liam.king@gatekeeper.local`), hr and admin see the whole company. Anyone with direct reports sees
+only their team, and no salary numbers. Everyone else gets 403. An analyst is an employee for
+records: they still can't open anyone else's profile, salary or reviews.
+
+**The small-group rule** for private numbers (salaries, leave, ratings), so no one person's
+details can be worked out:
+1. Nobody from a department with fewer than 5 active employees is ever counted: not in a total,
+   not with a filter, not in a group. (Only hiding such a department from one answer is not
+   enough: "everyone's payroll" minus "every other department" would give it back.)
+2. A group in an answer that is about fewer than 5 people is left out ("parental leave in
+   Legal: 2 people"). This also covers a manager's team of fewer than 5.
+
 ## Other useful commands
 
 | Command | What it does |

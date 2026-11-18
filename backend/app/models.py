@@ -86,7 +86,7 @@ class User(Base):
 
     # The database only accepts these four roles.
     __table_args__ = (
-        CheckConstraint("role IN ('employee', 'manager', 'hr', 'admin')", name="user_valid_role"),
+        CheckConstraint("role IN ('employee', 'manager', 'analyst', 'hr', 'admin')", name="user_valid_role"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)

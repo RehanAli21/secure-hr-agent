@@ -60,6 +60,8 @@ TOOL_PERMISSIONS = {
     # that the user's role may read (see app/policies.py).
     "search_policies": "view_own_profile",
     "get_roles": "view_own_profile",  # everyone: GET /roles is open to every logged-in user
+    # analysts, hr and admin (the whole company); managers have their own permission, see below
+    "get_analytics": "view_analytics",
     # changes
     "submit_leave_request": "submit_leave",
     "cancel_leave_request": "cancel_own_leave",
@@ -70,6 +72,12 @@ TOOL_PERMISSIONS = {
     "terminate_employee": "terminate_employee",
     "change_employee_role": "change_role",
     "change_employee_manager": "update_employee",
+}
+
+# A few tools are also offered with a SECOND permission. Managers see numbers about their own
+# team (view_team_analytics): the CRUD API decides whether it is the company or the team.
+ALSO_ALLOWED_WITH = {
+    "get_analytics": "view_team_analytics",
 }
 
 # The tools that CHANGE something. Every other tool only reads.
@@ -123,6 +131,33 @@ def approved_days_per_year(leave: list[dict[str, Any]]) -> dict[str, dict[str, i
     return totals
 
 
+def chart_for(answer: dict[str, Any], department: Optional[str], leave_type: Optional[str]) -> Optional[dict[str, Any]]:
+    """The chart for an answer from GET /analytics, or None when there is nothing to draw.
+
+    Built by CODE from the CRUD API's answer, never from the model's words, so the chart always
+    shows the real numbers, even if the model gets them wrong in its text.
+    """
+    if answer["group_by"] is None or len(answer["rows"]) < 2:
+        return None  # one number needs no chart: the answer's text says it
+    # What the chart is about, in a few words under its title, e.g. "by month · sick leave".
+    details = [f"by {answer['group_by'].replace('_', ' ')}"]
+    if leave_type is not None:
+        details.append(f"{leave_type} leave")
+    if department is not None:
+        details.append(department)
+    if answer["from_date"] is not None:
+        details.append(f"{answer['from_date']} to {answer['to_date']}")
+    if answer["scope"] == "team":
+        details.append("your team")
+    return {
+        "title": answer["description"],
+        "details": " · ".join(details),
+        # Over time (months, years): a line. Groups side by side (departments...): bars.
+        "kind": "line" if answer["group_by"] in ("month", "year") else "bar",
+        "points": [{"label": row["group"], "value": row["value"]} for row in answer["rows"]],
+    }
+
+
 def can_be_cancelled(request: dict[str, Any]) -> bool:
     """The CRUD API's rule: pending leave, or approved leave that has not started yet.
     We only use it to find the right request. The CRUD API still checks it when we cancel."""
@@ -162,7 +197,23 @@ class WhichRole(BaseModel):
 
     # Left out (None): a one-line summary of every role. Given: that role's permissions.
     # One role at a time, because all four with all their permissions is a lot of text.
-    role: Optional[Literal["employee", "manager", "hr", "admin"]] = None
+    role: Optional[Literal["employee", "manager", "analyst", "hr", "admin"]] = None
+
+
+class AnalyticsQuestion(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    # The same fixed lists as the CRUD API (GET /analytics): the model picks from them, it never
+    # writes a query. The CRUD API checks again, and says which combinations make no sense.
+    metric: Literal["headcount", "new_hires", "leavers", "average_salary", "payroll_total",
+                    "leave_days", "average_rating"]
+    # Required, with "none" for one total: Ollama hides Optional arguments' choices from the
+    # model, and with an optional group_by it left it out of "sick days per month".
+    group_by: Literal["none", "department", "month", "year", "leave_type", "period"]
+    department: Optional[str] = Field(default=None, min_length=1, max_length=100)
+    leave_type: Optional[Literal["annual", "sick", "unpaid", "parental"]] = None
+    from_date: Optional[date] = None
+    to_date: Optional[date] = None
 
 
 class NewLeaveRequest(BaseModel):
@@ -222,7 +273,7 @@ class NewRole(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     employee: str = WHO
-    role: Literal["employee", "manager", "hr", "admin"]  # a real list of choices, like the CRUD API
+    role: Literal["employee", "manager", "analyst", "hr", "admin"]  # a real list of choices, like the CRUD API
 
 
 class NewManager(BaseModel):
@@ -388,7 +439,7 @@ def make_tools(session: ChatSession, permissions: list[str]) -> list[FunctionToo
 
     def search_policies(question: str) -> str:
         """Search the company's HR policies (leave allowances, sick leave and doctor's notes, working
-        hours, working from home, procedures). Use it for ANY question about a rule: "how many days
+        hours, working from home, procedures like termination). Use it for ANY question about a rule: "how many days
         of annual leave do I get?", "do I need a doctor's note?". Not for the user's own records."""
         # The role comes live from the CRUD API, never from the model, so nobody can ask for
         # "the hr policies" by pretending to be HR.
@@ -407,7 +458,7 @@ def make_tools(session: ChatSession, permissions: list[str]) -> list[FunctionToo
         })
 
     def get_roles(role: Optional[str] = None) -> str:
-        """What a role (employee, manager, hr or admin) may do: "what can a manager do?".
+        """What a role (employee, manager, analyst, hr or admin) may do: "what can a manager do?".
         role is optional: without it, a summary of every role. Not for the user's own permissions."""
         roles = crud_api.call(session, "GET", "/roles")  # live from the CRUD API, never cached
         if role is None:
@@ -415,6 +466,32 @@ def make_tools(session: ChatSession, permissions: list[str]) -> list[FunctionToo
         chosen = next(one for one in roles if one["name"] == role)  # role is checked by WhichRole
         return as_json({"role": role, "summary": chosen["description"],
                         "may": list(chosen["descriptions"].values())})
+
+    # ---------- Numbers about many people ----------
+
+    def get_analytics(metric: str, group_by: str, department: Optional[str] = None,
+                      leave_type: Optional[str] = None, from_date: Optional[date] = None,
+                      to_date: Optional[date] = None) -> str:
+        """Numbers about MANY people (the company, or the user's team), never about the user's own
+        records: "how many people work here?", "average salary by department", "average rating per
+        review period", "sick days per month" (metric leave_days, group_by month, leave_type sick).
+        metric: headcount, new_hires, leavers, average_salary, payroll_total, leave_days or
+        average_rating. group_by: "none" for one total, or what "per ..."/"by ..." asks for.
+        The rest is optional: department, leave_type, from_date, to_date (YYYY-MM-DD)."""
+        question = {"metric": metric, "group_by": None if group_by == "none" else group_by, "department": department,
+                    "leave_type": leave_type, "from_date": from_date, "to_date": to_date}
+        # Only send what was given (None would be sent as the text "None"). Dates as YYYY-MM-DD.
+        params = {name: str(value) for name, value in question.items() if value is not None}
+        answer = crud_api.call(session, "GET", "/analytics", params=params)
+        # Kept for the page to draw (see chart_for). The model never sees or writes it.
+        session.chart = chart_for(answer, department, leave_type)
+        # The answer is already only totals and averages (the CRUD API's small-group rule).
+        # "scope" tells the model whether this is the whole company or just the user's team.
+        result = {name: answer[name] for name in ["description", "scope", "from_date", "to_date", "rows", "note"]
+                  if answer.get(name) is not None}
+        if metric in ("average_salary", "payroll_total"):
+            result["amounts"] = "The amounts have no currency: never add a currency sign."
+        return as_json(result)
 
     # ---------- Changes ----------
 
@@ -583,6 +660,7 @@ def make_tools(session: ChatSession, permissions: list[str]) -> list[FunctionToo
     def terminate_employee(employee: str, termination_date: date) -> str:
         """Propose to terminate an employee. termination_date is their last working day
         (YYYY-MM-DD). Only when the user asks ("terminate Sam Lee, last day 31 December").
+        No last working day given: ask the user for it, never pick one.
         employee: a name as the user wrote it, or an employee id. No need to search first."""
         person, problem = find_one_employee(employee, "employee")
         if person is None:
@@ -590,7 +668,7 @@ def make_tools(session: ChatSession, permissions: list[str]) -> list[FunctionToo
         return propose("terminate_employee", person["id"], {"termination_date": termination_date.isoformat()})
 
     def change_employee_role(employee: str, role: str) -> str:
-        """Propose a new role: employee, manager, hr or admin (what they may see and do in
+        """Propose a new role: employee, manager, analyst, hr or admin (what they may see and do in
         this system). Use it for "make Sam Lee a manager" or "give Sam Lee the hr role".
         employee: a name as the user wrote it, or an employee id. No need to search first."""
         person, problem = find_one_employee(employee, "employee")
@@ -623,6 +701,7 @@ def make_tools(session: ChatSession, permissions: list[str]) -> list[FunctionToo
         make_tool(get_employee, EmployeeId),
         make_tool(search_policies, PolicyQuestion),
         make_tool(get_roles, WhichRole),
+        make_tool(get_analytics, AnalyticsQuestion),
         make_tool(submit_leave_request, NewLeaveRequest),
         make_tool(cancel_leave_request, LeaveStartDate),
         make_tool(approve_leave_request, WhichTeamLeave),
@@ -635,4 +714,7 @@ def make_tools(session: ChatSession, permissions: list[str]) -> list[FunctionToo
 
     # Only offer the tools this user may use, so the AI doesn't offer things that would fail.
     # This is only for a better experience: the CRUD API still checks every single call itself.
-    return [tool for tool in all_tools if TOOL_PERMISSIONS.get(tool.metadata.get_name()) in permissions]
+    def may_use(name: str) -> bool:
+        return TOOL_PERMISSIONS.get(name) in permissions or ALSO_ALLOWED_WITH.get(name) in permissions
+
+    return [tool for tool in all_tools if may_use(tool.metadata.get_name())]

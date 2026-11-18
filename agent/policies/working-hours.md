@@ -1,4 +1,4 @@
-visible_to_roles: employee, manager, hr, admin
+visible_to_roles: employee, manager, analyst, hr, admin
 # Working hours policy
 
 ## Working hours

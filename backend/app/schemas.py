@@ -179,7 +179,7 @@ class ReviewOut(BaseModel):
 
 # ---------- Roles ----------
 
-Role = Literal["employee", "manager", "hr", "admin"]
+Role = Literal["employee", "manager", "analyst", "hr", "admin"]
 
 
 class RoleUpdate(BaseModel):
@@ -311,4 +311,49 @@ class MeOut(BaseModel):
     email: str
     kind: str  # "user" or "superuser"
     employee_id: Optional[int] = None  # superusers are not linked to an employee
-    role: Optional[str] = None  # "employee", "manager", "hr" or "admin". Superusers have no role: they skip all checks.
+    role: Optional[str] = None  # "employee", "manager", "analyst", "hr" or "admin". Superusers have no role: they skip all checks.
+
+
+# ---------- Analytics ----------
+# A question about numbers is NOT free text or SQL: it is a choice from these fixed lists, and the
+# API decides how each one is worked out (see app/analytics.py). Anything else gives 422.
+
+Metric = Literal[
+    "headcount",        # active employees today
+    "new_hires",        # people who started in the date range
+    "leavers",          # people whose employment ended in the date range
+    "average_salary",   # average current salary of active employees
+    "payroll_total",    # all current salaries of active employees added up
+    "leave_days",       # approved leave days that started in the date range
+    "average_rating",   # average performance review rating (1 to 5)
+]
+GroupBy = Literal["department", "month", "year", "leave_type", "period"]
+
+
+class AnalyticsQuery(BaseModel):
+    model_config = ConfigDict(extra="forbid")  # an unknown query parameter gives 422
+
+    metric: Metric
+    group_by: Optional[GroupBy] = None          # None = one number for everyone
+    department: Optional[str] = Field(default=None, min_length=1, max_length=100)  # its name
+    leave_type: Optional[LeaveType] = None      # only for leave_days
+    from_date: Optional[date] = None            # only for new_hires, leavers and leave_days
+    to_date: Optional[date] = None              # (default: the last 12 months)
+
+
+class AnalyticsRow(BaseModel):
+    group: str     # "Engineering", "2026-03", "sick"... or "All" without group_by
+    value: float   # the number: a count, an average or a total (amounts have no currency)
+    people: int    # how many people the number is about
+
+
+class AnalyticsOut(BaseModel):
+    metric: str
+    description: str             # what the number means, in plain words
+    group_by: Optional[str]
+    scope: str                   # "company", or "team" (a manager's direct reports)
+    from_date: Optional[date]    # the date range used, for the dated metrics
+    to_date: Optional[date]
+    rows: list[AnalyticsRow]
+    hidden_groups: int           # groups left out because they had fewer than 5 people
+    note: Optional[str] = None

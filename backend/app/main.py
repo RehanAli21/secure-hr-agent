@@ -2,7 +2,7 @@ from fastapi import Depends, FastAPI
 
 from app.idempotency import idempotency_middleware
 from app.rate_limits import rate_limit
-from app.routers import actions, audit_log, auth, departments, employees, leave, reviews, roles, salaries
+from app.routers import actions, analytics, audit_log, auth, departments, employees, leave, reviews, roles, salaries
 
 # The tables are created and updated by Alembic migrations, not here.
 # Run this before starting the server:   alembic upgrade head
@@ -26,6 +26,7 @@ app.include_router(salaries.router, dependencies=LIMITED)
 app.include_router(reviews.router, dependencies=LIMITED)
 app.include_router(audit_log.router, dependencies=LIMITED)
 app.include_router(actions.router, dependencies=LIMITED)
+app.include_router(analytics.router, dependencies=LIMITED)
 
 
 @app.get("/health")

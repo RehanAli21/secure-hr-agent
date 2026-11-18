@@ -38,7 +38,19 @@ bypassed, the database itself refuses to change or drop tables, edit or delete t
 change or delete a salary, delete an employee, change a password or create a login:
 `backend/tests/test_database_rights.py`.
 
+Analytics never shows one person's private details (`backend/tests/test_analytics.py`): only
+totals and averages; nobody from a department of fewer than 5 is counted in salary, leave or
+rating numbers (so subtracting answers can't bring them back); groups about fewer than 5 people
+are hidden; managers see only their team and no salaries; an analyst still can't open records.
+
 ## What these tests do not cover (yet)
+
+- **Analytics inside a big department can still be narrowed down by combining answers.** For
+  example, leave days in Engineering for January to June, minus January to May, gives June's
+  leave days, which may be one person's. The number is about a department of at least 5 people
+  and names nobody, which is the usual standard for HR reports, but someone who knows who was
+  off in June learns how long. Stronger protection (adding a little random noise to every number,
+  "differential privacy") is not built.
 
 - **Bulk updates are not built.** Every change is one record at a time, and lists return at most
   100 rows, so the case holds today. A real row cap comes with bulk updates, if they are ever built.

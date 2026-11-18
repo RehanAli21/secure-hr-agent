@@ -42,6 +42,8 @@ class ChatSession:
     # A big change the agent proposed in the CURRENT message (e.g. a new salary), waiting for the
     # user's Confirm button. Set by the tool, sent to the page with the reply (see app/agent.py).
     proposed_action: Optional[dict[str, Any]] = field(default=None, repr=False)
+    # A chart for the CURRENT message, from the last get_analytics call (see tools.chart_for).
+    chart: Optional[dict[str, Any]] = field(default=None, repr=False)
     # Which chat a trace belongs to (see new_chat_id).
     chat_id: str = field(default_factory=new_chat_id)
 

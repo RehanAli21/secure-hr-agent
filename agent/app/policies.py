@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 POLICY_FOLDER = Path(__file__).parent.parent / "policies"
-ROLES = {"employee", "manager", "hr", "admin"}
+ROLES = {"employee", "manager", "analyst", "hr", "admin"}
 MAX_RESULTS = 2  # at most this many chunks go to the model
 
 # Words that appear in almost every question, so they say nothing about which policy fits.

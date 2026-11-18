@@ -158,6 +158,8 @@ def pick_role(employee: Employee, hr_department_id: int, manager_ids: set[int]) 
         return "hr"        # everyone in Human Resources
     if employee.id in manager_ids:
         return "manager"   # anyone who has people reporting to them
+    if employee.job_title == "Financial Analyst":
+        return "analyst"   # the business analysts: company-wide numbers, no records
     return "employee"
 
 
@@ -502,7 +504,7 @@ def print_summary(db: Session) -> None:
         print(f"  {name:<12}{db.query(table).count():>6}")
 
     print("\nLogins per role:")
-    for role in ("employee", "manager", "hr", "admin"):
+    for role in ("employee", "manager", "analyst", "hr", "admin"):
         print(f"  {role:<12}{db.query(User).filter(User.role == role).count():>6}")
 
     print(f"\nLog in as any employee with password: {DEMO_PASSWORD}")
