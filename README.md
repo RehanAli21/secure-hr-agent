@@ -53,6 +53,31 @@ docker compose down -v            # stop AND delete all data, including the down
 With an NVIDIA card use `docker compose -f compose.yaml -f compose.gpu.yaml up --build`.
 For real use, set `SEED_DEMO_DATA=no` in `.env` before the first start.
 
+**Checked in CI:** on every push, GitHub builds the containers and starts them without the AI
+model (`.github/docker-smoke-test.sh`): the page loads, the agent reaches the CRUD API, a demo
+user can log in, and the API is connected to the database as `gatekeeper_app`. Run the same
+check yourself in Git Bash with `bash .github/docker-smoke-test.sh` (it uses its own Docker
+project, so it never touches your data).
+
+## Run on Windows without Docker
+
+You need Python 3.10+, Node 20+, [PostgreSQL](https://www.postgresql.org/download/windows/) with
+an empty database called `gatekeeper_hr` (see [`backend/README.md`](backend/README.md), step 1),
+and [Ollama](https://ollama.com/download).
+
+1. Double-click **`setup.bat`**. The first time it creates `backend\.env` and stops: fill in the
+   passwords (see `backend/README.md`, step 3), then run it again. It installs everything, creates
+   the tables, the API's database user and the demo company, and downloads the AI model. Run it
+   again after you pull new code: every step is safe to repeat.
+2. Double-click **`start.bat`**. It opens one window each for the backend, the agent and the page
+   (and Ollama, if it isn't running yet), then opens http://localhost:5173. Close a window to
+   stop that service. A service that is already running is left alone.
+
+Note: everything talks to whichever Ollama answers on port 11434. If you also have Ollama
+installed inside WSL (Ubuntu), it can start with WSL (for example when Docker Desktop starts) and
+take that port before the Windows app: the WSL one then gets used instead, with its own model
+folder. Run only one of them.
+
 ## Run the services by hand (for development)
 
 Start them in that order: backend, agent (with Ollama running), then the frontend.

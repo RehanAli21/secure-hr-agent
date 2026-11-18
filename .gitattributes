@@ -1,0 +1,4 @@
+# Shell scripts must keep Linux line endings, or bash fails on Windows checkouts.
+*.sh text eol=lf
+# Batch files must keep Windows line endings, or cmd misreads them.
+*.bat text eol=crlf

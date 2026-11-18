@@ -2,6 +2,8 @@
 # nobody ran the tests by hand.
 #
 #   backend, agent, frontend:  on every push and pull request (a few minutes)
+#   docker:                    also on every push: the containers from compose.yaml build, start
+#                              and talk to each other (without the AI model)
 #   eval:                      the REAL AI model (Ollama, on a CPU: slow, up to ~1 hour), so only
 #                              when you start it by hand (Actions tab -> CI -> "Run workflow"),
 #                              and every Monday night. It uses the seed data, never real data.
@@ -94,6 +96,20 @@ jobs:
       - run: npm ci
       - name: Type check and build
         run: npm run build
+
+  docker:
+    # Checks compose.yaml, the Dockerfiles and nginx.conf, which the jobs above never touch.
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    env:
+      # CI-only secrets: Docker Compose reads them like the values in a .env file.
+      POSTGRES_PASSWORD: ci-postgres-password
+      APP_DB_PASSWORD: ci-app-password
+      JWT_SECRET_KEY: ci-only-secret-0123456789abcdef0123456789abcdef
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build, start and check (see the script for what it checks)
+        run: bash .github/docker-smoke-test.sh
 
   eval:
     # The real model: only by hand or weekly, never on a push (it is slow).

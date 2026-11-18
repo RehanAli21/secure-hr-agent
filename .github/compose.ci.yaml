@@ -1,0 +1,10 @@
+# Used only by the Docker check (.github/docker-smoke-test.sh), on top of compose.yaml.
+# It lets the agent start WITHOUT Ollama: the check doesn't ask the AI anything, and the
+# Ollama image + model are ~11 GB, far too much to download on every push.
+# (!override = replace compose.yaml's list instead of adding to it.)
+
+services:
+  agent:
+    depends_on: !override
+      backend:
+        condition: service_healthy
