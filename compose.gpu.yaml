@@ -1,0 +1,14 @@
+# Add-on for computers with an NVIDIA graphics card: lets the Ollama container use it.
+# Use it together with compose.yaml:
+#   docker compose -f compose.yaml -f compose.gpu.yaml up --build
+# Without an NVIDIA card (or its driver), leave this file out: the model then runs on the CPU, slower.
+
+services:
+  ollama:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

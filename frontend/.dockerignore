@@ -1,0 +1,3 @@
+# Installed and built fresh inside the image.
+node_modules/
+dist/

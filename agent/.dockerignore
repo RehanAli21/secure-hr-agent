@@ -1,0 +1,7 @@
+# Never copied into the image: your local settings (.env), the virtual environment, caches, traces.
+.env
+.venv/
+__pycache__/
+.pytest_cache/
+traces/
+pyrightconfig.json

@@ -1,0 +1,6 @@
+# Never copied into the image: your local passwords (.env), the virtual environment, caches.
+.env
+.venv/
+__pycache__/
+.pytest_cache/
+pyrightconfig.json

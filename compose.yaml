@@ -1,0 +1,102 @@
+# Docker Compose: the whole app with ONE command, on any computer with Docker.
+#
+#   copy .env.example .env        (then fill in the three passwords, see .env.example)
+#   docker compose up --build     (the first time takes a while: it downloads the AI model, ~2.5 GB)
+#   open http://localhost:8080    (log in as sara.wilson@gatekeeper.local / Password123!)
+#
+# With an NVIDIA graphics card, the model is much faster:
+#   docker compose -f compose.yaml -f compose.gpu.yaml up --build
+#
+# Only the web page is reachable from your browser (port 8080). The database, the CRUD API, the
+# agent and Ollama talk to each other on Docker's private network, by their service names
+# ("db", "backend", "agent", "ollama"), and can't be reached from outside.
+
+services:
+  db:
+    image: postgres:18
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env (see .env.example)}
+      POSTGRES_DB: gatekeeper_hr
+    volumes:
+      - postgres_data:/var/lib/postgresql   # the data survives "docker compose down"
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres", "-d", "gatekeeper_hr"]
+      interval: 5s
+      retries: 20
+
+  # Runs ONCE, as the OWNER of the tables, then stops: migrations, the API's own database user
+  # (create_app_user.py) and the demo data. It is the only container with the owner's password.
+  backend-setup:
+    build: ./backend
+    command: ["python", "docker_setup.py"]
+    environment:
+      OWNER_DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD}@db:5432/gatekeeper_hr
+      DATABASE_URL: postgresql://gatekeeper_app:${APP_DB_PASSWORD:?Set APP_DB_PASSWORD in .env}@db:5432/gatekeeper_hr
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:?Set JWT_SECRET_KEY in .env}
+      SEED_DEMO_DATA: ${SEED_DEMO_DATA:-yes}
+    depends_on:
+      db:
+        condition: service_healthy
+
+  # The CRUD API. It only gets the limited gatekeeper_app user: it can't change tables, edit the
+  # audit log or delete a salary, even if something got past the Python code.
+  backend:
+    build: ./backend
+    environment:
+      DATABASE_URL: postgresql://gatekeeper_app:${APP_DB_PASSWORD}@db:5432/gatekeeper_hr
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+    depends_on:
+      backend-setup:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
+      interval: 5s
+      retries: 20
+
+  # The model server. The models are kept in a volume, so they are downloaded only once.
+  ollama:
+    image: ollama/ollama:0.40.16
+    volumes:
+      - ollama_models:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 5s
+      retries: 20
+
+  # Downloads the model (only the first time; later it sees it already has it), then stops.
+  ollama-pull:
+    image: ollama/ollama:0.40.16
+    environment:
+      OLLAMA_HOST: ollama:11434   # talk to the "ollama" container, not to itself
+    entrypoint: ["ollama", "pull", "qwen3:4b-instruct"]
+    depends_on:
+      ollama:
+        condition: service_healthy
+
+  # The agent service: no database settings at all. It reaches the data only through the CRUD API.
+  agent:
+    build: ./agent
+    environment:
+      CRUD_API_URL: http://backend:8000
+      OLLAMA_URL: http://ollama:11434
+      OLLAMA_CONTEXT: ${OLLAMA_CONTEXT:-8192}
+    volumes:
+      - agent_traces:/app/traces   # the traces (app/tracing.py) survive a restart
+    depends_on:
+      backend:
+        condition: service_healthy
+      ollama-pull:
+        condition: service_completed_successfully
+
+  # The web page, built once and served by nginx, which also forwards /api/... to the agent.
+  frontend:
+    build: ./frontend
+    ports:
+      - "8080:80"
+    depends_on:
+      - agent
+
+volumes:
+  postgres_data:
+  ollama_models:
+  agent_traces:
